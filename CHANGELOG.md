@@ -2,7 +2,7 @@
 
 All notable changes to `laravel-spectra` will be documented in this file.
 
-## v2.0.0 - Unreleased
+## v2.0.0 - 2026-10-15
 
 Spectra 2.0 fixes how requests are tracked and priced, updates every pricing
 catalog, and ships a redesigned dashboard. See [UPGRADE.md](UPGRADE.md).
