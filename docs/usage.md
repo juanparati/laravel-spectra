@@ -318,6 +318,62 @@ $tracker->finish();
 > [!NOTE]
 > **How Spectra stores streaming responses.** Unlike non-streaming responses where the full API response body is stored, streaming responses only persist the **accumulated text content** — not the individual SSE chunks. This is by design: a streaming session can produce hundreds or thousands of chunks, and storing every raw chunk as JSON would result in enormous database entries. The `response_id` stored for streaming requests is taken from the **first chunk** that contains an ID (e.g., `chatcmpl-...` for OpenAI or `msg_...` for Anthropic).
 
+<a name="traces"></a>
+## Traces
+
+One user action often makes several AI calls: an embedding to search your
+documents, a chat completion, then a tool call and a second completion.
+Spectra links these calls with a **trace id**.
+
+All AI calls made in the same unit of work share one trace id:
+
+- one HTTP request,
+- one queued job,
+- one Artisan command.
+
+You don't need to do anything for this. The next request or job starts a new
+trace.
+
+**Queued jobs join the trace.** A job dispatched during a request keeps the
+trace of that request. So the chain "request → job → AI call" is one trace.
+Spectra uses Laravel's [Context](https://laravel.com/docs/context) for this.
+The trace id is stored as hidden context, so it is not added to your logs.
+
+**Incoming `traceparent` header.** When the HTTP request has a W3C
+`traceparent` header (sent by an OpenTelemetry-aware gateway, proxy, or
+service), Spectra uses its trace id. Spectra's
+[OpenTelemetry](/opentelemetry#trace-correlation) spans then appear inside
+that trace, under the caller's span.
+
+In the dashboard, the request page shows a **Trace** card when a trace has
+more than one call: every call in order, a timeline, and the total cost,
+tokens, and time. You can also filter the requests list by trace id.
+
+### Setting the Trace Yourself
+
+```php
+// Use your own trace id for the rest of this request or job
+// (and the jobs it dispatches).
+Spectra::withTraceId($traceId);
+
+// Read the current trace id, for example to log it.
+$traceId = Spectra::currentTraceId();
+
+// Start a new trace. Useful in a long-running command that handles many
+// separate items in a loop.
+foreach ($tickets as $ticket) {
+    Spectra::newTrace();
+
+    $this->summarize($ticket);
+}
+
+// Give one call its own trace id.
+Spectra::track('openai', 'gpt-4o', fn () => ..., ['trace_id' => $traceId]);
+```
+
+To give every AI call its own trace id (the 1.x behaviour), set
+`SPECTRA_TRACE_PER_REQUEST=false`. See [Tracking Context](/configuration#tracking-context).
+
 <a name="global-configuration"></a>
 ## Global Configuration
 

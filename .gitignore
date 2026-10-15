@@ -12,3 +12,4 @@ coverage
 Thumbs.db
 build/
 /.claude
+/workbench/database/database.sqlite

@@ -9,7 +9,9 @@ use Exception;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\Console\AboutCommand;
+use Illuminate\Log\Context\Repository as ContextRepository;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\ServiceProvider;
 use Spectra\Contracts\RequestExporter;
 use Spectra\Contracts\SpanBuilder;
@@ -27,6 +29,7 @@ use Spectra\Support\RequestTransformer;
 use Spectra\Support\StatsAggregator;
 use Spectra\Support\Tracking\RequestPersister;
 use Spectra\Support\Tracking\RequestWriter;
+use Spectra\Support\Tracking\TraceContext;
 
 class SpectraServiceProvider extends ServiceProvider
 {
@@ -149,6 +152,7 @@ class SpectraServiceProvider extends ServiceProvider
         $this->registerResources();
         $this->registerHttpMacros();
         $this->registerWatchers();
+        $this->registerTracePropagation();
     }
 
     protected function registerAuthorization(): void
@@ -185,6 +189,25 @@ class SpectraServiceProvider extends ServiceProvider
             $watcher->register();
             $this->app->instance($watcherClass, $watcher);
         }
+    }
+
+    /**
+     * Give every queued job the trace of the request that dispatched it, even
+     * when the job is dispatched before the request's first AI call.
+     */
+    protected function registerTracePropagation(): void
+    {
+        Context::dehydrating(function (ContextRepository $context): void {
+            if (! config('spectra.tracking.trace_per_request', true)) {
+                return;
+            }
+
+            $context->addHidden(TraceContext::TRACE_ID, TraceContext::traceId());
+
+            if (($parentSpanId = TraceContext::parentSpanId()) !== null) {
+                $context->addHidden(TraceContext::PARENT_SPAN_ID, $parentSpanId);
+            }
+        });
     }
 
     protected function registerProviders(): void

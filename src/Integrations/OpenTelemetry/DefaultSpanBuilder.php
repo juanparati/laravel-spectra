@@ -26,7 +26,8 @@ class DefaultSpanBuilder implements SpanBuilder
         return [
             'traceId' => $this->generateTraceId($data['trace_id'] ?? null),
             'spanId' => $this->generateSpanId(),
-            'parentSpanId' => '',
+            // Set when the incoming request's `traceparent` started this trace.
+            'parentSpanId' => (string) ($data['parent_span_id'] ?? ''),
             'name' => $this->spanName($data),
             'kind' => 3, // SPAN_KIND_CLIENT
             'startTimeUnixNano' => $this->toNano($data['started_at']),

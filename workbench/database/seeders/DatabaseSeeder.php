@@ -60,14 +60,32 @@ class DatabaseSeeder extends Seeder
             $date = $today->copy()->subDays($day);
             $count = (int) round((40 + 30 * sin($day / 3)) * ($date->isWeekend() ? 0.6 : 1.0));
 
-            for ($i = 0; $i < $count; $i++) {
+            for ($i = 0; $i < $count;) {
                 $at = $date->copy()->addSeconds(mt_rand(7 * 3600, 22 * 3600));
 
-                if ($at->greaterThan($realNow)) {
-                    continue;
+                // One unit of work (a request or a job) makes 1-5 AI calls in a row,
+                // so they share a trace, the way they do in a real app.
+                Spectra::newTrace();
+                $user = $users->random();
+                $source = mt_rand(0, 3) === 0 ? 'queue' : 'web';
+                $steps = [1, 1, 1, 1, 1, 2, 2, 3, 4, 5][mt_rand(0, 9)];
+
+                for ($step = 0; $step < $steps && $i < $count; $step++, $i++) {
+                    if ($at->greaterThan($realNow)) {
+                        break;
+                    }
+
+                    // Multi-step chains often start with a retrieval embedding.
+                    $spec = $steps > 1 && $step === 0 && mt_rand(0, 1) === 0
+                        ? $this->mix[2]
+                        : $this->mix[$this->pick($weights)];
+
+                    $at = $this->recordOne($spec, $at, $user, $source)->addMilliseconds(mt_rand(40, 900));
                 }
 
-                $this->recordOne($this->mix[$this->pick($weights)], $at, $users->random());
+                if ($step === 0) {
+                    $i++;
+                }
             }
         }
 
@@ -77,7 +95,7 @@ class DatabaseSeeder extends Seeder
     /**
      * @param  array{0: string, 1: string, 2: string, 3: string, 4: int, 5: array{int, int}, 6: array{int, int}}  $spec
      */
-    protected function recordOne(array $spec, Carbon $at, User $user): void
+    protected function recordOne(array $spec, Carbon $at, User $user, string $source): Carbon
     {
         [$provider, $model, $type, $endpoint, , $promptRange, $completionRange] = $spec;
 
@@ -93,7 +111,7 @@ class DatabaseSeeder extends Seeder
         ]);
         $context->modelType = $type;
         $context->isStreaming = $streaming;
-        $context->requestSource = mt_rand(0, 3) === 0 ? 'queue' : 'web';
+        $context->requestSource = $source;
 
         $latency = match ($type) {
             'image' => mt_rand(6_000, 22_000),
@@ -115,7 +133,7 @@ class DatabaseSeeder extends Seeder
 
             Spectra::recordFailure($context, new ProviderErrorException($message, $status), $status);
 
-            return;
+            return $at->copy()->addMilliseconds($latency);
         }
 
         $prompt = mt_rand(...$promptRange);
@@ -143,6 +161,8 @@ class DatabaseSeeder extends Seeder
             'image_output_tokens' => $type === 'image' ? $completion : 0,
             'reasoning_tokens' => $type === 'text' && mt_rand(1, 100) <= 30 ? (int) ($completion * 0.4) : 0,
         ]);
+
+        return $at->copy()->addMilliseconds($latency);
     }
 
     /**

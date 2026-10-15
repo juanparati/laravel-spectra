@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useHelpers } from '@/composables/useHelpers';
 import { useLoading } from '@/composables/useLoading';
@@ -13,6 +13,7 @@ import ImageMetrics from './previews/ImageMetrics.vue';
 import TtsMetrics from './previews/TtsMetrics.vue';
 import SttMetrics from './previews/SttMetrics.vue';
 import VideoMetrics from './previews/VideoMetrics.vue';
+import TraceTimeline from './previews/TraceTimeline.vue';
 import Breadcrumb from '@/components/Breadcrumb.vue';
 import ProviderLogo from '@/components/ProviderLogo.vue';
 
@@ -86,6 +87,15 @@ const breadcrumbs = computed(() => [
 onMounted(() => {
     loadRequest();
 });
+
+// Moving between calls of a trace reuses this page, so load the new call in place.
+watch(() => route.params.id, (id, previous) => {
+    if (id && id !== previous) {
+        loadRequest();
+    }
+});
+
+const showTrace = computed(() => (request.value?.trace?.request_count ?? 0) > 1);
 </script>
 
 <template>
@@ -183,6 +193,9 @@ onMounted(() => {
                         <CodeBlock v-if="request.error_message" :content="request.error_message" variant="error" max-height="16rem" />
                         <div v-else class="card-body text-sm text-gray-600 dark:text-gray-400">The provider returned HTTP {{ request.status_code ?? '—' }} without a message.</div>
                     </div>
+
+                    <!-- Other AI calls of the same request, job, or command -->
+                    <TraceTimeline v-if="showTrace" :trace="request.trace" />
 
                     <!-- Model-specific metrics -->
                     <component :is="metricsComponent" :request="request" :expanded="metricsExpanded" @toggle="metricsExpanded = !metricsExpanded" />

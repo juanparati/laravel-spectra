@@ -15,6 +15,7 @@ use Spectra\Support\Tracking\RequestContext;
 use Spectra\Support\Tracking\RequestPersister;
 use Spectra\Support\Tracking\ResponseProcessor;
 use Spectra\Support\Tracking\StreamingTracker;
+use Spectra\Support\Tracking\TraceContext;
 use Throwable;
 
 class Spectra
@@ -66,7 +67,8 @@ class Spectra
             'metadata' => array_merge($this->globalMetadata, $options['metadata'] ?? []),
             'trackable_type' => $options['trackable_type'] ?? $this->globalTrackableType,
             'trackable_id' => $options['trackable_id'] ?? $this->globalTrackableId,
-            'trace_id' => $options['trace_id'] ?? $this->globalTraceId,
+            'trace_id' => $options['trace_id'] ?? $this->globalTraceId ?? $this->requestTraceId(),
+            'parent_span_id' => $options['parent_span_id'] ?? $this->requestParentSpanId($options),
         ]);
 
         if ($this->globalPricingTier && $context->pricingTier === null) {
@@ -173,11 +175,61 @@ class Spectra
         return $this;
     }
 
+    /**
+     * Use this trace id for the rest of the current request, job, or command.
+     * Queued jobs dispatched afterwards keep it too.
+     */
     public function withTraceId(string $traceId): self
     {
         $this->globalTraceId = $traceId;
 
+        if (config('spectra.tracking.trace_per_request', true)) {
+            TraceContext::set($traceId);
+        }
+
         return $this;
+    }
+
+    /**
+     * The trace id shared by the current request, job, or command.
+     */
+    public function currentTraceId(): ?string
+    {
+        if ($this->globalTraceId !== null) {
+            return $this->globalTraceId;
+        }
+
+        return config('spectra.tracking.trace_per_request', true) ? TraceContext::traceId() : null;
+    }
+
+    /**
+     * Start a new trace: the next AI call gets a fresh trace id.
+     */
+    public function newTrace(): self
+    {
+        $this->globalTraceId = null;
+        TraceContext::reset();
+
+        return $this;
+    }
+
+    protected function requestTraceId(): ?string
+    {
+        return config('spectra.tracking.trace_per_request', true) ? TraceContext::traceId() : null;
+    }
+
+    /**
+     * The incoming `traceparent` span, when this call belongs to that trace.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    protected function requestParentSpanId(array $options): ?string
+    {
+        if (isset($options['trace_id']) || $this->globalTraceId !== null || ! config('spectra.tracking.trace_per_request', true)) {
+            return null;
+        }
+
+        return TraceContext::parentSpanId();
     }
 
     /**
@@ -196,7 +248,12 @@ class Spectra
         $this->globalTrackableType = null;
         $this->globalTrackableId = null;
         $this->globalPricingTier = null;
-        $this->globalTraceId = null;
+
+        if ($this->globalTraceId !== null) {
+            $this->globalTraceId = null;
+            TraceContext::reset();
+        }
+
         $this->globalMetadata = [];
 
         return $this;

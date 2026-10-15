@@ -37,7 +37,8 @@ catalog, and ships a redesigned dashboard. See [UPGRADE.md](UPGRADE.md).
 
 #### Added
 
-- New columns: `cached_tokens`, `cache_write_tokens`, `page_count`, `currency`, `error_type`, `error_message`, `conversation_id`, `conversation_turn`, `request_source`, `laravel_request_id`, `ip_address`, `user_agent` (and matching daily-stat totals)
+- One trace per request: all AI calls of the same HTTP request, queued job or Artisan command share a trace id, queued jobs dispatched during a request keep it, and an incoming W3C `traceparent` header is joined (its span becomes the OpenTelemetry parent). New `Spectra::currentTraceId()` and `Spectra::newTrace()`, and `tracking.trace_per_request` / `tracking.use_traceparent` config
+- New columns: `cached_tokens`, `cache_write_tokens`, `page_count`, `currency`, `error_type`, `error_message`, `parent_span_id`, `conversation_id`, `conversation_turn`, `request_source`, `laravel_request_id`, `ip_address`, `user_agent` (and matching daily-stat totals)
 - `spectra.costs.exchange_rates` config
 - `spectra:prune --stats-days`; prune now deletes stored media and works in chunks
 - OpenTelemetry spans follow the current GenAI semantic conventions (cache read/write, reasoning, stream, conversation and error attributes)
@@ -45,7 +46,7 @@ catalog, and ships a redesigned dashboard. See [UPGRADE.md](UPGRADE.md).
 
 #### Dashboard
 
-- Redesigned UI: crisper neutral palette, refined typography with tabular numbers, a cleaner header and navigation, sparklines, breakdown legends with amounts and shares, a colour-blind-safe chart palette that follows the light/dark theme, and a new request detail page with the input (uncached, cache read, cache write) and output (answer, reasoning) token breakdown, error details and request origin
+- Redesigned UI: crisper neutral palette, refined typography with tabular numbers, a cleaner header and navigation, sparklines, breakdown legends with amounts and shares, a colour-blind-safe chart palette that follows the light/dark theme, and a new request detail page with the input (uncached, cache read, cache write) and output (answer, reasoning) token breakdown, error details and request origin, and a Trace card that shows every AI call of the same request as a timeline with its total cost, tokens and time
 
 ## v1.3.0 - 2026-07-04
 

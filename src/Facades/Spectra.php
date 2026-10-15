@@ -25,6 +25,8 @@ use Spectra\Testing\SpectraFake;
  * @method static Spectra addGlobalTags(array<int, string> $tags)
  * @method static Spectra withPricingTier(string $tier)
  * @method static Spectra withTraceId(string $traceId)
+ * @method static string|null currentTraceId()
+ * @method static Spectra newTrace()
  * @method static Spectra withMetadata(array<string, mixed> $metadata)
  * @method static Spectra clearGlobals()
  * @method static Spectra forTrackable(Model $trackable)

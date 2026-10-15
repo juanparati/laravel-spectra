@@ -146,11 +146,19 @@ Spectra assigns a `trace_id` to each tracked request. This identifier appears in
 
 ### Automatic Trace IDs
 
-Every tracked request receives a UUID trace ID automatically. To give several requests the same trace ID (for example, all AI calls of one HTTP request or job), set it once with `Spectra::withTraceId($traceId)`. Like the other global settings, it is reset between queued jobs and Octane requests.
+All AI calls of the same HTTP request, queued job, or Artisan command share one trace ID. A queued job dispatched during a request keeps the request's trace ID. Each exported span is a separate span inside that trace, so your backend shows the calls of one request together. See [Traces](/usage#traces).
+
+### Joining an Incoming Trace
+
+When the incoming HTTP request has a W3C [`traceparent`](https://www.w3.org/TR/trace-context/#traceparent-header) header, Spectra uses its trace ID and sets the caller's span as the parent of each AI span. Your gateway, proxy, or calling service then shows the AI calls nested under its own span.
+
+The header's 32-character trace ID is stored as a UUID in the `trace_id` column (the same 128 bits), and the parent span ID in the `parent_span_id` column. The exported span uses the original hex value, so it matches the caller's trace.
+
+Turn this off with `SPECTRA_USE_TRACEPARENT=false`.
 
 ### Custom Trace IDs
 
-You can provide your own trace ID to integrate with an existing tracing system. This is useful when you want AI request spans to appear under the same trace as your application's HTTP request or background job:
+You can provide your own trace ID to integrate with an existing tracing system. Use a UUID, or a 32-character hex OpenTelemetry trace ID written as a UUID. Set it for the rest of the request or job with `Spectra::withTraceId($traceId)`, or for one call:
 
 ```php
 $result = Spectra::track('openai', 'gpt-4o', function ($ctx) use ($myTraceId) {
@@ -165,7 +173,7 @@ $result = Spectra::track('openai', 'gpt-4o', function ($ctx) use ($myTraceId) {
 
 | System | Location |
 | --- | --- |
-| Spectra Dashboard | Filterable in the request explorer's "Trace ID" field |
+| Spectra Dashboard | The **Trace** card on the request page, and the requests list filter |
 | OpenTelemetry | The span's `trace_id` attribute, visible in your backend's trace view |
 
 This enables end-to-end tracing: a user clicking "Generate Summary" triggers an API route, which calls an AI model, which writes to the database, which dispatches a queue job — all linked under a single trace ID visible across both Spectra and your observability platform.

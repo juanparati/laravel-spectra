@@ -91,6 +91,7 @@ class RequestPersister
         return [
             'batch_id' => $data['batch_id'] ?? null,
             'trace_id' => $data['trace_id'] ?? null,
+            'parent_span_id' => $context->parentSpanId,
             'response_id' => $context->responseId,
             'conversation_id' => $context->conversationId,
             'conversation_turn' => $context->conversationTurn,

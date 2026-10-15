@@ -38,11 +38,11 @@ This copies the migration files to `database/migrations/`. By default, Laravel g
 <a name="v2-migration"></a>
 ## The 2.0 Migration
 
-Spectra 2.0 adds columns for prompt-cache usage, page counts, error details, conversation ids, and request origin. Earlier versions tracked some of these values in memory but never saved them.
+Spectra 2.0 adds columns for prompt-cache usage, page counts, error details, the incoming trace's parent span, conversation ids, and request origin. Earlier versions tracked some of these values in memory but never saved them.
 
 | Table | New columns |
 | --- | --- |
-| `spectra_requests` | `cached_tokens`, `cache_write_tokens`, `page_count`, `currency`, `error_type`, `error_message`, `conversation_id` (indexed), `conversation_turn`, `request_source`, `laravel_request_id`, `ip_address`, `user_agent` |
+| `spectra_requests` | `cached_tokens`, `cache_write_tokens`, `page_count`, `currency`, `error_type`, `error_message`, `parent_span_id`, `conversation_id` (indexed), `conversation_turn`, `request_source`, `laravel_request_id`, `ip_address`, `user_agent` |
 | `spectra_daily_stats` | `total_cached_tokens`, `total_cache_write_tokens`, `total_pages` |
 
 When you upgrade from 1.x, run the installer again:

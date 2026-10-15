@@ -167,6 +167,15 @@ If you rely on the old names, extend `DefaultSpanBuilder` and override `attribut
 If you schedule `spectra:prune`, decide how long to keep daily stats and add `--stats-days`. See [`spectra:prune`](/commands#spectra-prune).
 
 <a name="other-changes"></a>
+<a name="one-trace-per-request"></a>
+## One Trace per Request
+
+In 1.x every AI call got its own trace id unless you called `Spectra::withTraceId()`. In 2.0 all AI calls of the same HTTP request, queued job, or Artisan command share one trace id. Queued jobs dispatched during a request keep that trace. When the incoming request has a W3C `traceparent` header, its trace id is used. See [Traces](/usage#traces).
+
+The new migration adds a `parent_span_id` column for the `traceparent` span. To keep the 1.x behaviour, set `SPECTRA_TRACE_PER_REQUEST=false`.
+
+A long-running Artisan command that handles many separate items puts all of their AI calls in one trace. Call `Spectra::newTrace()` for each item if you want them apart.
+
 ## Other Changes
 
 - Saving a tracked request never throws into your app any more. Failures go to your exception handler.
