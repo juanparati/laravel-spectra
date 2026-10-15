@@ -62,7 +62,7 @@ const copy = async (text) => {
 
 <style scoped>
 .code-block {
-    @apply overflow-hidden border border-gray-200 dark:border-gray-700;
+    @apply overflow-hidden border border-gray-200 dark:border-gray-800;
 }
 
 .code-block.error {
@@ -70,7 +70,7 @@ const copy = async (text) => {
 }
 
 .code-block-header {
-    @apply flex items-center justify-end px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700;
+    @apply flex items-center justify-end px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-800;
 }
 
 .code-block.error .code-block-header {

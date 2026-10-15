@@ -53,19 +53,19 @@ const imagesExpanded = ref(false);
             <div v-if="expanded" class="card-body">
                 <!-- Token-based models (gpt-image-1, gpt-image-1.5) -->
                 <div v-if="hasTokens" class="grid grid-cols-4 gap-6">
-                    <div class="text-center p-4 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                    <div class="text-center p-4 rounded-lg bg-gray-50 dark:bg-white/[0.03]">
                         <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Input Tokens</div>
                         <div class="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">
                             {{ formatNumber(request.prompt_tokens || 0) }}
                         </div>
                     </div>
-                    <div class="text-center p-4 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                    <div class="text-center p-4 rounded-lg bg-gray-50 dark:bg-white/[0.03]">
                         <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Output Tokens</div>
                         <div class="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">
                             {{ formatNumber(request.completion_tokens || 0) }}
                         </div>
                     </div>
-                    <div class="text-center p-4 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                    <div class="text-center p-4 rounded-lg bg-gray-50 dark:bg-white/[0.03]">
                         <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Images Generated</div>
                         <div class="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">
                             {{ formatNumber(request.image_count || 0) }}
@@ -81,7 +81,7 @@ const imagesExpanded = ref(false);
 
                 <!-- Per-image models (DALL-E, legacy endpoints) -->
                 <div v-else class="grid grid-cols-2 gap-6">
-                    <div class="text-center p-4 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+                    <div class="text-center p-4 rounded-lg bg-gray-50 dark:bg-white/[0.03]">
                         <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Images Generated</div>
                         <div class="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">
                             {{ formatNumber(request.image_count || 0) }}
@@ -145,7 +145,7 @@ const imagesExpanded = ref(false);
                         :key="idx"
                         :href="url"
                         target="_blank"
-                        class="block rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 hover:ring-2 hover:ring-primary-500 transition-shadow"
+                        class="block rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800 hover:ring-2 hover:ring-primary-500 transition-shadow"
                     >
                         <img :src="url" :alt="'Generated image ' + (idx + 1)" class="w-full h-auto" loading="lazy" />
                     </a>

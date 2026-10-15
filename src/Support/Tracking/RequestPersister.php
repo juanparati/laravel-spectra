@@ -9,17 +9,23 @@ use Spectra\Events\RequestTracked;
 use Spectra\Jobs\ExportTrackedRequestJob;
 use Spectra\Jobs\PersistSpectraRequestJob;
 use Spectra\Models\SpectraRequest;
-use Spectra\Support\Budget\BudgetEnforcer;
 use Spectra\Support\Pricing\PricingLookup;
 use Spectra\Support\Pricing\RequestCostCalculator;
 use Spectra\Support\RequestTransformer;
-use Spectra\Support\StatsAggregator;
+use Throwable;
 
+/**
+ * Turns a finished RequestContext into a stored SpectraRequest, synchronously,
+ * after the response, or on a queue.
+ *
+ * Tracking must never break the host application: any failure while saving
+ * is reported through the exception handler and an unsaved model is returned.
+ */
 class RequestPersister
 {
     public function __construct(
         protected RequestCostCalculator $costCalculator,
-        protected StatsAggregator $statsAggregator,
+        protected RequestWriter $writer,
         protected RequestExporter $exporter,
         protected RequestTransformer $transformer
     ) {}
@@ -30,14 +36,26 @@ class RequestPersister
             return new SpectraRequest;
         }
 
+        try {
+            return $this->store($context);
+        } catch (Throwable $e) {
+            report($e);
+
+            return new SpectraRequest($this->safeAttributes($context));
+        }
+    }
+
+    protected function store(RequestContext $context): SpectraRequest
+    {
+        $attributes = $this->buildAttributes($context);
+
         if (! config('spectra.storage.store_requests', true)) {
-            $request = new SpectraRequest($context->toArray());
+            $request = new SpectraRequest($attributes);
             $this->exportToIntegrations($request);
 
             return $request;
         }
 
-        $attributes = $this->buildAttributes($context);
         $tags = $context->tags;
 
         if (config('spectra.queue.enabled')) {
@@ -56,46 +74,42 @@ class RequestPersister
      */
     public function buildAttributes(RequestContext $context): array
     {
-        // Override latency with provider-side generation time when available
-        // (e.g. Sora video responses include completed_at/created_at timestamps)
-        $responseData = is_array($context->response) ? $context->response : [];
-        if (isset($responseData['completed_at'], $responseData['created_at'])) {
-            $context->latencyMs = (int) (($responseData['completed_at'] - $responseData['created_at']) * 1000);
-        }
-
         $data = $context->toArray();
-
-        $model = $this->resolveDisplayName($context->provider, $context->model);
-        $snapshot = $context->snapshot;
-
-        $promptTokens = $context->promptTokens;
-        $completionTokens = $context->completionTokens;
-        $cachedTokens = $context->cachedTokens;
 
         $pricingTier = $context->pricingTier
             ?? config("spectra.costs.provider_settings.{$context->provider}.default_tier", 'standard');
 
-        $cost = $this->costCalculator->forContext($context, $pricingTier);
+        $cost = config('spectra.costs.enabled', true)
+            ? $this->costCalculator->forContext($context, $pricingTier)
+            : ['total_cost_in_cents' => 0.0];
 
-        $trackableType = $context->trackableType;
-        $trackableId = $context->trackableId;
+        // Raw payloads are only present in toArray() when the matching storage
+        // switch allows it; never fall back to the context, which always has them.
+        $requestData = array_key_exists('request_data', $data) ? $data['request_data'] : null;
+        $response = array_key_exists('response', $data) ? $data['response'] : null;
 
         return [
             'batch_id' => $data['batch_id'] ?? null,
             'trace_id' => $data['trace_id'] ?? null,
             'response_id' => $context->responseId,
+            'conversation_id' => $context->conversationId,
+            'conversation_turn' => $context->conversationTurn,
             'provider' => $context->provider,
-            'model' => $model,
-            'snapshot' => $snapshot,
+            'model' => $this->resolveDisplayName($context->provider, $context->model),
+            // The provider's model id. `model` holds the catalog display name,
+            // so keep the id even when the response echoed the requested one.
+            'snapshot' => $context->snapshot ?? ($context->model !== 'unknown' ? $context->model : null),
             'model_type' => $context->modelType,
             'endpoint' => $context->endpoint,
             'pricing_tier' => $pricingTier,
-            'trackable_type' => $trackableType,
-            'trackable_id' => $trackableId,
-            'request' => $this->sanitizeForJson($data['request_data'] ?? $context->requestData),
-            'response' => $this->sanitizeResponse($context, $data['response'] ?? null),
-            'prompt_tokens' => $promptTokens,
-            'completion_tokens' => $completionTokens,
+            'trackable_type' => $context->trackableType,
+            'trackable_id' => $context->trackableId,
+            'request' => $this->sanitizeForJson($requestData),
+            'response' => $this->sanitizeResponse($context, $response),
+            'prompt_tokens' => $context->promptTokens,
+            'completion_tokens' => $context->completionTokens,
+            'cached_tokens' => $context->cachedTokens,
+            'cache_write_tokens' => $context->cacheWriteTokens,
             'reasoning_tokens' => $context->reasoningTokens,
             'finish_reason' => $context->finishReason,
             'has_tool_calls' => $context->hasToolCalls,
@@ -104,19 +118,29 @@ class RequestPersister
             'input_characters' => $context->inputCharacters,
             'image_count' => $context->imageCount,
             'video_count' => $context->videoCount,
+            'page_count' => $context->pageCount,
             'expires_at' => $context->expiresAt,
             'prompt_cost' => $cost['prompt_cost'] ?? 0,
             'completion_cost' => $cost['completion_cost'] ?? 0,
             'total_cost_in_cents' => $cost['total_cost_in_cents'],
-            'latency_ms' => $context->latencyMs,
+            'currency' => strtoupper((string) config('spectra.costs.currency', 'USD')),
+            // Async jobs report their own generation time; the HTTP call that
+            // fetched the result only measured a status poll.
+            'latency_ms' => $context->providerLatencyMs ?? $context->latencyMs,
             'time_to_first_token_ms' => $context->timeToFirstTokenMs,
             'tokens_per_second' => $context->tokensPerSecond,
             'is_reasoning' => $context->isReasoning,
             'reasoning_effort' => $context->reasoningEffort,
             'is_streaming' => $context->isStreaming,
             'status_code' => $context->httpStatus,
+            'error_type' => $context->errorType,
+            'error_message' => $this->truncate($context->errorMessage, 10_000),
             'media_storage_path' => $context->mediaStoragePath,
             'metadata' => $context->metadata ?: null,
+            'request_source' => $context->requestSource,
+            'laravel_request_id' => $context->laravelRequestId,
+            'ip_address' => $context->ipAddress,
+            'user_agent' => $this->truncate($context->userAgent, 1_000),
             'created_at' => $context->getStartedAt(),
             'completed_at' => $context->getCompletedAt(),
         ];
@@ -133,37 +157,7 @@ class RequestPersister
      */
     protected function persistSync(array $attributes, array $tags): SpectraRequest
     {
-        if ($attributes['response_id'] ?? null) {
-            $request = SpectraRequest::updateOrCreate(
-                ['response_id' => $attributes['response_id']],
-                $attributes
-            );
-        } else {
-            $request = SpectraRequest::create($attributes);
-        }
-
-        if (! empty($tags)) {
-            $request->attachTags($tags);
-        }
-
-        $this->statsAggregator->recordRequest($request);
-        $this->reportBudgetUsage($request);
-        $this->exportToIntegrations($request);
-
-        return $request;
-    }
-
-    /**
-     * Announce budget threshold/exceeded events based on the actual recorded
-     * cost (pre-flight enforcement only sees spend from previous requests).
-     */
-    protected function reportBudgetUsage(SpectraRequest $request): void
-    {
-        if (! config('spectra.budget.enabled', true)) {
-            return;
-        }
-
-        app(BudgetEnforcer::class)->reportRecordedRequest($request);
+        return $this->writer->write($attributes, $tags);
     }
 
     /**
@@ -197,15 +191,13 @@ class RequestPersister
      */
     protected function persistAfterResponse(array $attributes, array $tags): SpectraRequest
     {
-        $job = new PersistSpectraRequestJob($attributes, $tags);
-
-        dispatch($job)->afterResponse();
+        dispatch(new PersistSpectraRequestJob($attributes, $tags))->afterResponse();
 
         return new SpectraRequest($attributes);
     }
 
     /**
-     * Transform and export a request to all enabled integrations.
+     * Transform and export a request that is not stored (store_requests off).
      */
     public function exportToIntegrations(SpectraRequest $request): void
     {
@@ -246,6 +238,28 @@ class RequestPersister
         }
 
         $this->exporter->export($data);
+    }
+
+    /**
+     * Minimal attributes for the unsaved model returned when saving failed.
+     *
+     * @return array<string, mixed>
+     */
+    protected function safeAttributes(RequestContext $context): array
+    {
+        return [
+            'provider' => $context->provider,
+            'model' => $context->model,
+            'prompt_tokens' => $context->promptTokens,
+            'completion_tokens' => $context->completionTokens,
+            'total_cost_in_cents' => $context->totalCost,
+            'status_code' => $context->httpStatus,
+        ];
+    }
+
+    protected function truncate(?string $value, int $length): ?string
+    {
+        return $value !== null && mb_strlen($value) > $length ? mb_substr($value, 0, $length) : $value;
     }
 
     /**

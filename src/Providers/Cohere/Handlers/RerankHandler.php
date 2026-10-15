@@ -13,6 +13,11 @@ use Spectra\Data\Metrics;
 use Spectra\Data\SearchMetrics;
 use Spectra\Enums\ModelType;
 
+/**
+ * Cohere Rerank (`/v2/rerank`, `/v1/rerank`), billed per search unit: one
+ * query with up to 100 documents (long documents are split into chunks that
+ * count as extra documents).
+ */
 class RerankHandler implements ExtractsModelFromResponse, Handler, MatchesResponseShape
 {
     use ExtractsModelField;

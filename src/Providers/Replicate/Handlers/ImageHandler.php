@@ -5,31 +5,35 @@ declare(strict_types=1);
 namespace Spectra\Providers\Replicate\Handlers;
 
 use Illuminate\Support\Facades\Http;
-use Spectra\Concerns\ExtractsModelField;
-use Spectra\Concerns\MatchesParametricEndpoints;
+use Spectra\Contracts\ExtractsModelFromRequest;
 use Spectra\Contracts\ExtractsModelFromResponse;
 use Spectra\Contracts\Handler;
 use Spectra\Contracts\HasFinishReason;
 use Spectra\Contracts\HasMedia;
+use Spectra\Contracts\HasProviderLatency;
 use Spectra\Contracts\MatchesResponseShape;
+use Spectra\Contracts\ReportsJobFailure;
+use Spectra\Contracts\SkipsResponse;
 use Spectra\Data\ImageMetrics;
 use Spectra\Data\Metrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\Replicate\Concerns\HandlesPredictions;
 use Spectra\Support\MediaPersister;
 
-class ImageHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, HasMedia, MatchesResponseShape
+/**
+ * Replicate predictions that produce images.
+ *
+ * Image models return one URL (FLUX 1.1 Pro, Ideogram, Recraft) or a list of
+ * URLs. The count comes from `metrics.image_count` when Replicate reports
+ * it, otherwise from the image URLs in the output.
+ */
+class ImageHandler implements ExtractsModelFromRequest, ExtractsModelFromResponse, Handler, HasFinishReason, HasMedia, HasProviderLatency, MatchesResponseShape, ReportsJobFailure, SkipsResponse
 {
-    use ExtractsModelField;
-    use MatchesParametricEndpoints;
+    use HandlesPredictions;
 
     public function modelType(): ModelType
     {
         return ModelType::Image;
-    }
-
-    public function endpoints(): array
-    {
-        return ['/v1/models/{owner}/{model}/predictions'];
     }
 
     /**
@@ -38,11 +42,11 @@ class ImageHandler implements ExtractsModelFromResponse, Handler, HasFinishReaso
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
-        $output = $responseData['output'] ?? [];
+        $reported = $responseData['metrics']['image_count'] ?? null;
 
         return new Metrics(
             image: new ImageMetrics(
-                count: is_array($output) && ! empty($output) ? count($output) : 0,
+                count: is_numeric($reported) ? (int) $reported : count($this->imageUrls($responseData)),
             ),
         );
     }
@@ -50,36 +54,15 @@ class ImageHandler implements ExtractsModelFromResponse, Handler, HasFinishReaso
     /** @param  array<string, mixed>  $response */
     public function extractResponse(array $response): ?string
     {
-        $output = $response['output'] ?? [];
+        $urls = $this->outputUrls($response);
 
-        if (! is_array($output) || empty($output)) {
-            return null;
-        }
-
-        return implode("\n", $output);
-    }
-
-    /** @param  array<string, mixed>  $response */
-    public function extractFinishReason(array $response): ?string
-    {
-        return $response['status'] ?? null;
+        return $urls !== [] ? implode("\n", $urls) : null;
     }
 
     /** @param  array<string, mixed>  $data */
     public function matchesResponse(array $data): bool
     {
-        if (! isset($data['urls'], $data['status'])) {
-            return false;
-        }
-
-        $output = $data['output'] ?? null;
-
-        // Image models return an array of URL strings
-        if (is_array($output) && ! empty($output) && is_string($output[0] ?? null)) {
-            return (bool) filter_var($output[0], FILTER_VALIDATE_URL);
-        }
-
-        return false;
+        return $this->predictionKind($data) === 'image';
     }
 
     /**
@@ -89,25 +72,34 @@ class ImageHandler implements ExtractsModelFromResponse, Handler, HasFinishReaso
     public function storeMedia(string $requestId, array $responseData, ?string $rawBody = null): array
     {
         $persister = app(MediaPersister::class);
-        $output = $responseData['output'] ?? [];
         $stored = [];
 
-        if (! is_array($output)) {
-            return [];
-        }
+        foreach ($this->imageUrls($responseData) as $i => $url) {
+            $response = Http::withoutAITracking()->get($url);
 
-        foreach ($output as $i => $url) {
-            if (is_string($url)) {
-                $response = Http::withoutAITracking()->get($url);
-                if (! $response->successful()) {
-                    continue;
-                }
-                $extension = $this->resolveExtensionFromContentType($response->header('Content-Type'));
-                $stored[] = $persister->store($requestId, $i, $response->body(), $extension);
+            if (! $response->successful()) {
+                continue;
             }
+
+            $extension = $this->resolveExtensionFromContentType($response->header('Content-Type'));
+            $stored[] = $persister->store($requestId, $i, $response->body(), $extension);
         }
 
         return $stored;
+    }
+
+    /**
+     * Output URLs that are not clearly another kind of file (audio, video).
+     *
+     * @param  array<string, mixed>  $data
+     * @return list<string>
+     */
+    protected function imageUrls(array $data): array
+    {
+        return array_values(array_filter(
+            $this->outputUrls($data),
+            fn (string $url) => ! in_array($this->fileKind($url), ['video', 'audio'], true),
+        ));
     }
 
     private function resolveExtensionFromContentType(?string $contentType): string

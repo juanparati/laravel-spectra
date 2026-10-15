@@ -2,6 +2,51 @@
 
 All notable changes to `laravel-spectra` will be documented in this file.
 
+## v2.0.0 - Unreleased
+
+Spectra 2.0 fixes how requests are tracked and priced, updates every pricing
+catalog, and ships a redesigned dashboard. See [UPGRADE.md](UPGRADE.md).
+
+#### Tracking fixes
+
+- Streaming through Laravel's HTTP client no longer breaks the app: 1.x read the whole stream before the app could, which left the app with an empty body and stored a zero-token row. Streams are now tracked automatically as the app reads them (HTTP client, Prism, Laravel AI SDK, openai-php, Guzzle stacks), including SSE, newline-delimited JSON and streamed JSON arrays, streams the app stops reading early, and error events sent inside a stream
+- Anthropic prompt caching was billed far too low: cache reads were subtracted from `input_tokens` (which already excludes them) and cache writes were never billed. Prompt tokens now include cache reads and writes, and 5-minute and 1-hour writes bill at their own rates
+- Gemini thinking tokens and tool-use prompt tokens, and xAI reasoning tokens, are now billed
+- The pricing tier the provider reports (batch, flex, priority/fast, ultrafast) now wins over the request's own tier, so downgraded or project-default tiers are priced right
+- A finished Replicate prediction threw an exception into the app's own `Http::post()` call (ISO timestamps were subtracted as numbers)
+- Polled async jobs (video, background responses, predictions, queued jobs) were counted once per poll in daily stats and budgets; repeat writes now add only what changed
+- OpenAI Responses latency was replaced by whole-second provider timestamps
+- Trackables were stored with the class name but looked up by morph alias, so budgets and per-user usage found nothing in apps with a morph map
+- An explicit trackable was replaced by the signed-in user
+- Global tags, trackable, pricing tier and metadata leaked between queued jobs and Octane requests (`Spectra` is now a scoped service)
+- Saving a tracked request could throw into the app (e.g. a duplicate daily-stat row under load); failures are now reported instead
+- With prompt storage turned off, the raw request body was still saved
+- Budget alerts fired on every PHP-FPM request after a threshold, but never again in long-running workers; they now fire once per period, using the cache
+- Multipart requests (audio uploads) lost their model when the file came first, which priced them at $0
+- Provider error responses are stored with the provider's message; connection failures are recorded and still thrown
+
+#### Pricing
+
+- New pricing dimensions: cache writes, long-context prices (`aboveInputTokens`), prices that change on a date (`since`), audio and image token rates, `fast` and `ultrafast` tiers, `megapixel`, `page` and `request` units, model aliases, retired models, per-catalog currency with exchange rates, provider-reported costs, and regional surcharges
+- All 12 catalogs updated to current models and prices (October 2026), including Claude 5.x, GPT-6 / GPT-5.6, Gemini 3.8 / 4, Grok 4.5–4.7, and many corrections; retired models are kept for history and marked
+- Model ids resolve through aliases, dated snapshots and routing suffixes, and the model the provider served is priced first
+
+#### Requirements
+
+- Laravel 12 or 13 (Laravel 11 support is dropped; it no longer receives security fixes). PHP 8.2–8.5. The test suite runs on Pest 3, 4 or 5.
+
+#### Added
+
+- New columns: `cached_tokens`, `cache_write_tokens`, `page_count`, `currency`, `error_type`, `error_message`, `conversation_id`, `conversation_turn`, `request_source`, `laravel_request_id`, `ip_address`, `user_agent` (and matching daily-stat totals)
+- `spectra.costs.exchange_rates` config
+- `spectra:prune --stats-days`; prune now deletes stored media and works in chunks
+- OpenTelemetry spans follow the current GenAI semantic conventions (cache read/write, reasoning, stream, conversation and error attributes)
+- Workbench demo data (`vendor/bin/testbench workbench:build`) for working on the dashboard
+
+#### Dashboard
+
+- Redesigned UI: crisper neutral palette, refined typography with tabular numbers, a cleaner header and navigation, sparklines, breakdown legends with amounts and shares, a colour-blind-safe chart palette that follows the light/dark theme, and a new request detail page with the input (uncached, cache read, cache write) and output (answer, reasoning) token breakdown, error details and request origin
+
 ## v1.3.0 - 2026-07-04
 
 ### 1.3.0 - 2026-07-04

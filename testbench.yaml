@@ -3,10 +3,7 @@ providers:
   - Workbench\App\Providers\WorkbenchServiceProvider
 
 migrations:
-  - workbench/database/migrations
-
-seeders:
-  - Workbench\Database\Seeders\DatabaseSeeder
+  - database/migrations
 
 workbench:
   start: /spectra
@@ -15,3 +12,9 @@ workbench:
     web: true
     commands: true
     health: false
+  build:
+    - create-sqlite-db
+    - db-wipe
+    - migrate-fresh:
+        --seed: true
+        --seeder: Workbench\Database\Seeders\DatabaseSeeder

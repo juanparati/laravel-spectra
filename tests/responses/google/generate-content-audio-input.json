@@ -1,0 +1,41 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "The speaker asks for the meeting to move to Thursday at 3 pm."
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 5000,
+    "candidatesTokenCount": 150,
+    "totalTokenCount": 5150,
+    "cachedContentTokenCount": 1000,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 200
+      },
+      {
+        "modality": "AUDIO",
+        "tokenCount": 4800
+      }
+    ],
+    "cacheTokensDetails": [
+      {
+        "modality": "AUDIO",
+        "tokenCount": 1000
+      }
+    ],
+    "serviceTier": "standard"
+  },
+  "modelVersion": "gemini-2.5-flash",
+  "responseId": "c13vaKuEJpbX7M8P0Nqf2Qs"
+}

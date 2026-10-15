@@ -64,7 +64,7 @@ it('uses DefaultSpanBuilder when none is provided', function () {
 
     $span = $exporter->createSpan($data);
 
-    expect($span['name'])->toBe('ai.openai.gpt-4o')
+    expect($span['name'])->toBe('chat gpt-4o')
         ->and($span)->toHaveKeys(['traceId', 'spanId', 'attributes', 'status']);
 });
 

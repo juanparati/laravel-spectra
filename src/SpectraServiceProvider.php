@@ -26,6 +26,7 @@ use Spectra\Support\ProviderRegistry;
 use Spectra\Support\RequestTransformer;
 use Spectra\Support\StatsAggregator;
 use Spectra\Support\Tracking\RequestPersister;
+use Spectra\Support\Tracking\RequestWriter;
 
 class SpectraServiceProvider extends ServiceProvider
 {
@@ -35,7 +36,9 @@ class SpectraServiceProvider extends ServiceProvider
             __DIR__.'/../config/spectra.php', 'spectra'
         );
 
-        $this->app->singleton(Spectra::class, function ($app) {
+        // Scoped, so global tags, trackables, pricing tier and metadata are
+        // reset between queued jobs and Octane requests instead of leaking.
+        $this->app->scoped(Spectra::class, function ($app) {
             return new Spectra($app);
         });
 
@@ -63,10 +66,18 @@ class SpectraServiceProvider extends ServiceProvider
             return new RequestTransformer;
         });
 
+        $this->app->singleton(RequestWriter::class, function ($app) {
+            return new RequestWriter(
+                $app->make(StatsAggregator::class),
+                $app->make(RequestTransformer::class),
+                $app->make(RequestExporter::class),
+            );
+        });
+
         $this->app->singleton(RequestPersister::class, function ($app) {
             return new RequestPersister(
                 $app->make(RequestCostCalculator::class),
-                $app->make(StatsAggregator::class),
+                $app->make(RequestWriter::class),
                 $app->make(RequestExporter::class),
                 $app->make(RequestTransformer::class)
             );

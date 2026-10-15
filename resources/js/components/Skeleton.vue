@@ -63,7 +63,7 @@ defineProps({
 
         <!-- Table row skeleton -->
         <template v-else-if="variant === 'table-row'">
-            <tr v-for="i in lines" :key="i" class="border-b border-gray-200 dark:border-gray-700">
+            <tr v-for="i in lines" :key="i" class="border-b border-gray-200 dark:border-gray-800">
                 <td class="px-4 py-3" v-for="j in 5" :key="j">
                     <div class="skeleton-line h-4" :class="j === 1 ? 'w-20' : 'w-16'"></div>
                 </td>

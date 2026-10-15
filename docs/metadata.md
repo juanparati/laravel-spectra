@@ -63,7 +63,7 @@ This is useful when metadata is known before the callback runs.
 <a name="global-metadata"></a>
 ## Global Metadata
 
-Apply metadata to every tracked request in the current process:
+Apply metadata to every tracked request in the current request or queued job (global settings are reset between queued jobs and Octane requests):
 
 ```php
 use Spectra\Facades\Spectra;
@@ -103,7 +103,20 @@ This is a common pattern for batch APIs and offline processing pipelines.
 <a name="streaming-metadata"></a>
 ## Streaming Metadata
 
-You can add metadata when creating a streaming tracker:
+Streams through Laravel's HTTP client or the OpenAI SDK are tracked automatically, so add metadata the same way as for other requests: with `Spectra::withMetadata()`, or with the `metadata` option of `Http::withAITracking()`:
+
+```php
+$response = Http::withAITracking('openai', 'gpt-4o', [
+    'metadata' => [
+        'tenant_id' => $tenantId,
+        'feature' => 'live-chat',
+    ],
+])
+    ->withOptions(['stream' => true])
+    ->post('https://api.openai.com/v1/chat/completions', [...]);
+```
+
+For SDKs that Spectra does not track on its own, pass metadata when you create a [streaming tracker](/usage#spectra-stream):
 
 ```php
 $tracker = Spectra::stream('openai', 'gpt-4o', [
@@ -114,7 +127,7 @@ $tracker = Spectra::stream('openai', 'gpt-4o', [
 ]);
 ```
 
-Spectra also adds `streaming: true` automatically for streamed requests.
+Streamed requests are marked with `is_streaming = true`.
 
 <a name="where-metadata-is-stored"></a>
 ## Where Metadata Is Stored

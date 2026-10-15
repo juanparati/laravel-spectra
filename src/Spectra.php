@@ -56,15 +56,17 @@ class Spectra
      */
     public function startRequest(string $provider, string $model, array $options = []): RequestContext
     {
+        // Options first, so the merged tags/metadata and the global fallbacks
+        // below are not overwritten by the raw per-request values.
         $context = new RequestContext([
+            ...$options,
             'provider' => $provider,
             'model' => $model,
-            'tags' => array_merge($this->globalTags, $options['tags'] ?? []),
+            'tags' => array_values(array_unique(array_merge($this->globalTags, $options['tags'] ?? []))),
             'metadata' => array_merge($this->globalMetadata, $options['metadata'] ?? []),
             'trackable_type' => $options['trackable_type'] ?? $this->globalTrackableType,
             'trackable_id' => $options['trackable_id'] ?? $this->globalTrackableId,
             'trace_id' => $options['trace_id'] ?? $this->globalTraceId,
-            ...$options,
         ]);
 
         if ($this->globalPricingTier && $context->pricingTier === null) {
@@ -202,7 +204,7 @@ class Spectra
 
     public function forTrackable(Model $trackable): self
     {
-        $this->globalTrackableType = get_class($trackable);
+        $this->globalTrackableType = $trackable->getMorphClass();
         $this->globalTrackableId = $trackable->getKey();
 
         return $this;
@@ -244,6 +246,16 @@ class Spectra
         $this->pendingStreamContext = null;
 
         return $context;
+    }
+
+    /**
+     * Forget the pending stream context, but only if it is the given one.
+     */
+    public function clearPendingStreamContext(RequestContext $context): void
+    {
+        if ($this->pendingStreamContext === $context) {
+            $this->pendingStreamContext = null;
+        }
     }
 
     public function usage(): UsageQueryBuilder

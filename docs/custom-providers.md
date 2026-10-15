@@ -5,7 +5,7 @@ Spectra ships with built-in support for several AI providers. You can extend it 
 <a name="how-provider-detection-works"></a>
 ## How Provider Detection Works
 
-When an outgoing HTTP request is intercepted, Spectra's `ProviderRegistry` attempts to match it against all configured providers through a three-step process:
+When an outgoing HTTP request is intercepted, Spectra's `ProviderRegistry` attempts to match it against all configured providers in two steps:
 
 1. **Host matching** — The request URL's hostname is compared against each provider's `getHosts()` list. Host patterns support `{placeholder}` syntax for variable segments, such as `{resource}.openai.azure.com`.
 2. **Endpoint matching** — The URL path is checked against each handler's `endpoints()` list to confirm the request targets a trackable API endpoint.
@@ -73,6 +73,7 @@ class MistralChatHandler implements Handler, ExtractsModelFromResponse
     /**
      * Extract token usage metrics from the provider's response.
      * The returned Metrics DTO determines how cost is calculated.
+     * promptTokens is the full prompt, completionTokens the full output.
      */
     public function extractMetrics(
         array $requestData,
@@ -302,7 +303,7 @@ class MyHandler implements Handler, ExtractsModelFromRequest
 
 ### `SkipsResponse`
 
-Some API workflows involve polling for a result that isn't immediately available. Video generation, for example, returns an incomplete response until processing finishes. Implement `SkipsResponse` to prevent Spectra from storing intermediate polling responses — only the final completed response will be tracked:
+Some API workflows involve polling for a result that isn't immediately available. Video generation, for example, returns an unfinished job (`queued`, `in_progress`) until processing finishes. Implement `SkipsResponse` and return `true` for these non-terminal states, so Spectra does not record the polls. Only the finished response is tracked:
 
 ```php
 use Spectra\Contracts\SkipsResponse;
@@ -311,8 +312,29 @@ class MyVideoHandler implements Handler, SkipsResponse
 {
     public function shouldSkipResponse(array $responseData): bool
     {
-        // Only track completed video generations
+        // Only track finished video generations
         return ($responseData['status'] ?? null) !== 'completed';
+    }
+}
+```
+
+If the finished job is fetched more than once, Spectra does not count it twice. Writes with the same provider response id update the existing row, and only the change is added to the daily stats and budgets. Make sure your handler's response id is the job id.
+
+### `HasProviderLatency`
+
+For an async job, the HTTP call that fetched the result only measures a status poll. Implement `HasProviderLatency` on the handler to return the real generation time the provider reports, in milliseconds. Spectra stores it as the request's latency. Return `null` when the response doesn't say:
+
+```php
+use Spectra\Contracts\HasProviderLatency;
+
+class MyVideoHandler implements Handler, HasProviderLatency
+{
+    public function extractProviderLatency(array $responseData): ?int
+    {
+        // The provider reports the generation time in seconds
+        $seconds = $responseData['metrics']['predict_time'] ?? null;
+
+        return is_numeric($seconds) ? (int) round($seconds * 1000) : null;
     }
 }
 ```
@@ -362,7 +384,7 @@ class MySpeechHandler implements Handler, ExtractsModelFromRequest, ReturnsBinar
 
 ### `StreamsResponse`
 
-Implement `StreamsResponse` to provide a custom `StreamHandler` for streaming (SSE) responses. Spectra uses the `StreamHandler` to extract text content, token usage, and finish reasons from individual streaming chunks:
+Implement `StreamsResponse` to provide a custom `StreamHandler` for streamed responses. Spectra parses the stream (server-sent events, newline-delimited JSON, or a JSON array) and passes each decoded event to the `StreamHandler`, which extracts text content, token usage, finish reasons, and the model:
 
 ```php
 use Spectra\Contracts\StreamsResponse;
@@ -391,13 +413,18 @@ class MyStreamHandler extends StreamHandler
 
     public function usage(array $data, array $currentUsage): array
     {
-        $usage = $data['usage'] ?? [];
+        $usage = $data['usage'] ?? null;
 
-        return [
-            'prompt_tokens' => $usage['prompt_tokens'] ?? $currentUsage['prompt_tokens'],
-            'completion_tokens' => $usage['completion_tokens'] ?? $currentUsage['completion_tokens'],
-            'cached_tokens' => $currentUsage['cached_tokens'],
-        ];
+        if (! is_array($usage)) {
+            return $currentUsage; // This event has no usage
+        }
+
+        return array_merge($currentUsage, [
+            'prompt_tokens' => $usage['prompt_tokens'] ?? 0,         // full prompt
+            'completion_tokens' => $usage['completion_tokens'] ?? 0, // full output
+            'cached_tokens' => $usage['prompt_tokens_details']['cached_tokens'] ?? 0,
+            'reasoning_tokens' => $usage['completion_tokens_details']['reasoning_tokens'] ?? 0,
+        ]);
     }
 
     public function finishReason(array $data): ?string
@@ -407,14 +434,36 @@ class MyStreamHandler extends StreamHandler
 
     public function model(array $data): ?array
     {
-        return isset($data['model']) ? ['model' => $data['model']] : null;
+        return isset($data['model']) ? ['model' => $data['model'], 'id' => $data['id'] ?? null] : null;
     }
 }
 ```
 
+`usage()` receives the usage collected so far and returns the updated array. This lets providers that send usage in several events (like Anthropic) add it up. The token keys follow the [`TokenMetrics`](#metrics-dtos) rules: `prompt_tokens` is the full prompt and `completion_tokens` is the full output. The breakdown keys are:
+
+| Key | Part of |
+| --- | --- |
+| `cached_tokens` | `prompt_tokens` |
+| `cache_write_tokens` | `prompt_tokens` |
+| `cache_write_1h_tokens` | `cache_write_tokens` |
+| `audio_input_tokens` | `prompt_tokens` |
+| `image_input_tokens` | `prompt_tokens` |
+| `reasoning_tokens` | `completion_tokens` |
+| `audio_output_tokens` | `completion_tokens` |
+| `image_output_tokens` | `completion_tokens` |
+
+You may also return these extra keys. Spectra applies them to the request:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `reported_cost_in_cents` | `float` | The cost the provider reported, in US cents. It replaces the catalog price. |
+| `tool_calls` | `array<string, int>` | Billable server-tool usage, keyed like the provider's [`toolCallPricing()`](/pricing#tool-call-pricing) |
+| `pricing_tier` | `string` | The tier the provider says it served. Ignored when a tier was set explicitly. |
+| `cost_multiplier` | `float` | A price multiplier, for example `1.1` for US-only inference |
+
 ### `HasMedia`
 
-AI providers often return generated images and videos as temporary URLs that expire after a set period. Implement `HasMedia` to download and persist these files to a Laravel filesystem disk before the URLs expire. The following example shows how OpenAI's image handler stores generated images:
+AI providers often return generated images and videos as temporary URLs that expire after a set period. Implement `HasMedia` to download and persist these files to a Laravel filesystem disk before the URLs expire. `$rawBody` holds the raw response body for binary responses (for example, TTS audio). The following example shows how OpenAI's image handler stores generated images:
 
 ```php
 use Illuminate\Support\Facades\Http;
@@ -425,7 +474,8 @@ class MyImageHandler implements Handler, HasMedia
 {
     public function storeMedia(
         string $requestId,
-        array $responseData
+        array $responseData,
+        ?string $rawBody = null
     ): array {
         $persister = app(MediaPersister::class);
         $stored = [];
@@ -434,11 +484,11 @@ class MyImageHandler implements Handler, HasMedia
             if (isset($item['b64_json'])) {
                 // Image returned as base64-encoded data
                 $content = base64_decode($item['b64_json']);
-                $stored[] = $persister->store($requestId, $i, $content, 'image', 'png', 'b64_json');
+                $stored[] = $persister->store($requestId, $i, $content, 'png');
             } elseif (isset($item['url'])) {
                 // Image returned as a temporary URL — download before it expires
                 $content = Http::withoutAITracking()->get($item['url'])->body();
-                $stored[] = $persister->store($requestId, $i, $content, 'image', 'png', $item['url']);
+                $stored[] = $persister->store($requestId, $i, $content, 'png');
             }
         }
 
@@ -449,7 +499,7 @@ class MyImageHandler implements Handler, HasMedia
 
 ### `ExtractsPricingTierFromRequest` / `ExtractsPricingTierFromResponse`
 
-Implemented on the **provider class** (not the handler) when the provider offers multiple pricing tiers. These interfaces allow Spectra to detect the active tier from request or response metadata. Implement one or both depending on where the tier information is available:
+Implemented on the **provider class** (not the handler) when the provider offers multiple pricing tiers. These interfaces allow Spectra to detect the active tier from the request or the response. Implement one or both depending on where the tier information is available. Return a Spectra tier name (`standard`, `batch`, `flex`, `priority`, `fast`, `ultrafast`, `hd`) or `null`:
 
 ```php
 use Spectra\Contracts\ExtractsPricingTierFromRequest;
@@ -459,15 +509,17 @@ class MyProvider extends Provider implements ExtractsPricingTierFromRequest, Ext
 {
     public function extractPricingTierFromRequest(array $requestData): ?string
     {
-        return $requestData['tier'] ?? null;
+        return $requestData['service_tier'] ?? null;
     }
 
     public function extractPricingTierFromResponse(array $responseData): ?string
     {
-        return $responseData['system_fingerprint'] ?? null;
+        return $responseData['service_tier'] ?? null;
     }
 }
 ```
+
+The tier from the response wins over the tier from the request, because the provider may serve a request at a different tier than it asked for. A tier set with `Spectra::withPricingTier()` or the `pricing_tier` option wins over both.
 
 The default pricing tier is resolved from config automatically (`spectra.costs.provider_settings.{provider}.default_tier`), so providers do not need to define it themselves. To configure a default tier for your provider, add it to `config/spectra.php`:
 
@@ -479,27 +531,48 @@ The default pricing tier is resolved from config automatically (`spectra.costs.p
 ],
 ```
 
+<a name="extracts-cost-multiplier"></a>
+### `ExtractsCostMultiplier`
+
+Also implemented on the **provider class**. Use it when the provider charges a surcharge that the response shows, such as Anthropic's 1.1x price for US-only inference (`usage.inference_geo`). Return the multiplier, or `null` for none. Spectra multiplies the model cost by it (tool call fees are not multiplied):
+
+```php
+use Spectra\Contracts\ExtractsCostMultiplier;
+
+class MyProvider extends Provider implements ExtractsCostMultiplier
+{
+    public function extractCostMultiplier(array $responseData, array $requestData): ?float
+    {
+        return ($responseData['usage']['region'] ?? null) === 'us' ? 1.1 : null;
+    }
+}
+```
+
 <a name="metrics-dtos"></a>
 ## Metrics DTOs
 
-Handlers return a `Metrics` container with typed data transfer objects for each metric category. Use the appropriate DTO based on your handler's model type:
+Handlers return a `Metrics` container with typed data transfer objects for each metric category. Use the DTOs that match your handler's model type:
 
 ```php
-use Spectra\Data\Metrics;
-use Spectra\Data\TokenMetrics;
-use Spectra\Data\ImageMetrics;
 use Spectra\Data\AudioMetrics;
+use Spectra\Data\DocumentMetrics;
+use Spectra\Data\ImageMetrics;
+use Spectra\Data\Metrics;
+use Spectra\Data\SearchMetrics;
+use Spectra\Data\TokenMetrics;
 use Spectra\Data\VideoMetrics;
 
 // Text / LLM response
 new Metrics(tokens: new TokenMetrics(
-    promptTokens: 150,
-    completionTokens: 50,
-    cachedTokens: 100,       // Optional: prompt-cached tokens
+    promptTokens: 1200,      // full prompt: uncached + cache reads + cache writes
+    completionTokens: 300,   // full output, including reasoning
+    cachedTokens: 800,       // part of promptTokens
+    cacheWriteTokens: 200,   // part of promptTokens
+    reasoningTokens: 120,    // part of completionTokens
 ));
 
 // Image generation
-new Metrics(image: new ImageMetrics(count: 4));
+new Metrics(image: new ImageMetrics(count: 4, megapixels: 4.2));
 
 // Audio (TTS or STT)
 new Metrics(audio: new AudioMetrics(
@@ -512,18 +585,114 @@ new Metrics(video: new VideoMetrics(
     count: 1,
     durationSeconds: 15.0,
 ));
+
+// Per-search models (for example, rerank)
+new Metrics(search: new SearchMetrics(count: 1));
+
+// Per-page document models (for example, OCR)
+new Metrics(document: new DocumentMetrics(pages: 12));
 ```
 
-The handler's `modelType()` return value determines which pricing formula is applied and how the request is rendered in the dashboard:
+<a name="token-metrics"></a>
+### `TokenMetrics`
+
+`promptTokens` must be the **full** prompt and `completionTokens` the **full** output. Every other field is a part of one of these two totals, so nothing is counted twice. If your provider reports a part outside its totals (for example, Anthropic leaves cache tokens out of `input_tokens`), add it to the total yourself.
+
+| Field | Part of | Description |
+| --- | --- | --- |
+| `promptTokens` | — | All input tokens: uncached, cache reads, and cache writes |
+| `completionTokens` | — | All output tokens, including reasoning |
+| `cachedTokens` | `promptTokens` | Input tokens read from the prompt cache |
+| `cacheWriteTokens` | `promptTokens` | Input tokens written to the prompt cache |
+| `cacheWrite1hTokens` | `cacheWriteTokens` | Cache writes with a 1-hour lifetime. The rest bill at the 5-minute rate. |
+| `audioInputTokens` | `promptTokens` | Uncached audio input tokens |
+| `imageInputTokens` | `promptTokens` | Uncached image input tokens |
+| `reasoningTokens` | `completionTokens` | Output tokens used for reasoning or thinking |
+| `audioOutputTokens` | `completionTokens` | Audio output tokens |
+| `imageOutputTokens` | `completionTokens` | Image output tokens |
+
+`TokenMetrics::fromArray()` builds the object from a snake_case usage array (`prompt_tokens`, `cached_tokens`, `cache_write_tokens`, ...), and `toUsageArray()` turns it back into one.
+
+<a name="metrics-fields"></a>
+### `Metrics`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `tokens` | `?TokenMetrics` | Token usage |
+| `image` | `?ImageMetrics` | Image count, and output megapixels for models billed per megapixel |
+| `audio` | `?AudioMetrics` | Audio duration and input characters |
+| `video` | `?VideoMetrics` | Video count and duration |
+| `search` | `?SearchMetrics` | Billed search units |
+| `document` | `?DocumentMetrics` | Pages, for models billed per page |
+| `toolCalls` | `array<string, int>` | Billable server-tool usage, keyed like the provider's [`toolCallPricing()`](/pricing#tool-call-pricing) (for example, `['web_search_requests' => 3]`) |
+| `reportedCostInCents` | `?float` | The cost the provider reported for this request, in US cents. When set, it replaces the catalog price. |
+
+```php
+$costInDollars = $responseData['usage']['cost'] ?? null;
+
+return new Metrics(
+    tokens: new TokenMetrics(promptTokens: 1200, completionTokens: 300),
+    toolCalls: ['web_search_requests' => 3],
+    reportedCostInCents: $costInDollars !== null ? $costInDollars * 100 : null,
+);
+```
+
+The handler's `modelType()` decides how the request is classified and shown in the dashboard. The cost formula comes from the model's [pricing unit](/pricing#pricing-units) in the catalog:
 
 | ModelType | Used For | Primary Metric |
 | --- | --- | --- |
-| `Text` | Chat completions, text generation | Tokens |
+| `Text` | Chat completions, text generation, OCR | Tokens or pages |
 | `Embedding` | Vector embeddings | Tokens (input only) |
-| `Image` | Image generation | Image count |
+| `Image` | Image generation | Image count or megapixels |
 | `Video` | Video generation | Video count / duration |
 | `Tts` | Text-to-speech | Duration / characters |
 | `Stt` | Speech-to-text | Duration |
+
+<a name="openai-compatible-providers"></a>
+## OpenAI-Compatible Providers
+
+Many providers offer an OpenAI-compatible `chat/completions` endpoint. For these, extend `OpenAiCompatibleChatHandler`. It already reads the usage, model, finish reason, and response text, and it handles streamed responses too. You only need to list the endpoints:
+
+```php
+use Spectra\Providers\Concerns\OpenAiCompatibleChatHandler;
+
+class AcmeChatHandler extends OpenAiCompatibleChatHandler
+{
+    public function endpoints(): array
+    {
+        return ['/v1/chat/completions'];
+    }
+}
+```
+
+Override these methods when the provider is different from OpenAI. They are used for normal and streamed responses:
+
+| Method | Override when |
+| --- | --- |
+| `reasoningTokensAreSeparate(): bool` (protected) | The provider reports reasoning tokens outside `completion_tokens` (like xAI). Return `true`, and Spectra adds them to the output. |
+| `reportedCostInCents(array $usage, array $responseData): ?float` | The response contains the charged cost (like OpenRouter `usage.cost`). Return it in US cents. |
+| `usageFrom(array $data): ?array` | The usage object is somewhere else in the response or stream event. The default reads `usage`, then `x_groq.usage`. |
+| `tokensFromUsage(array $usage): TokenMetrics` | The usage fields have other names. The default reads `prompt_tokens`, `completion_tokens`, `prompt_tokens_details.cached_tokens`, `prompt_tokens_details.cache_write_tokens`, `prompt_tokens_details.audio_tokens`, `completion_tokens_details.reasoning_tokens`, and `completion_tokens_details.audio_tokens`. |
+
+```php
+class AcmeChatHandler extends OpenAiCompatibleChatHandler
+{
+    public function endpoints(): array
+    {
+        return ['/v1/chat/completions'];
+    }
+
+    protected function reasoningTokensAreSeparate(): bool
+    {
+        return true;
+    }
+
+    public function reportedCostInCents(array $usage, array $responseData): ?float
+    {
+        return isset($usage['cost']) ? (float) $usage['cost'] * 100 : null;
+    }
+}
+```
 
 <a name="adding-pricing"></a>
 ## Adding Pricing

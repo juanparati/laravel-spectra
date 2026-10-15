@@ -190,7 +190,7 @@ it('should get text-generating models', function () {
     $textModels = app(PricingLookup::class)->canGenerateText();
 
     expect($textModels)->toContain('gpt-4o')
-        ->and($textModels)->toContain('claude-sonnet-4-20250514')
+        ->and($textModels)->toContain('claude-sonnet-4')
         ->and($textModels)->not->toContain('dall-e-3');
 });
 

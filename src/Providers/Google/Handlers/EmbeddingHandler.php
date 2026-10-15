@@ -14,6 +14,10 @@ use Spectra\Enums\ModelType;
 use Spectra\Providers\Google\ExtractsModelFromGoogleEndpoint;
 use Spectra\Providers\Google\GoogleTokenCounter;
 
+/**
+ * Gemini embeddings (`embedContent`, `batchEmbedContents`). The response has
+ * no usage, so the prompt size comes from the countTokens API.
+ */
 class EmbeddingHandler implements ExtractsModelFromRequest, Handler, MatchesResponseShape
 {
     use ExtractsModelFromGoogleEndpoint;

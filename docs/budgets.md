@@ -107,7 +107,7 @@ Setting either threshold to `0` disables it. The defaults are 80% (warning) and 
 $user->configureAiBudget()
     ->monthlyCostLimitInCents(20000)
     ->allowProviders(['openai', 'anthropic'])
-    ->allowModels(['gpt-4o', 'claude-sonnet-4-20250514'])
+    ->allowModels(['gpt-4o', 'claude-sonnet-4-6'])
     ->save();
 ```
 
@@ -190,6 +190,15 @@ The middleware checks budgets **before** the request runs, using the spend recor
 
 Spectra dispatches events when budget thresholds are reached, giving you the opportunity to send notifications, trigger alerts, or take any other action in response to budget pressure.
 
+<a name="alerts-fire-once"></a>
+### Alerts Fire Once per Period
+
+The warning, critical, and exceeded alerts fire **once** per budget, limit, and period. For example, the monthly warning for a user fires once in October, and again in November if usage reaches it again. A daily limit can fire once per day, and a weekly limit once per week. If you change a limit, its alerts can fire again.
+
+Spectra keeps the "already sent" mark in your application's default cache store. This way it holds across PHP-FPM requests and queue workers. Use a shared cache store (such as Redis or the database) when you run more than one server. The `array` cache store is not shared between processes, so alerts can fire more than once with it.
+
+One exception: when the middleware blocks a request with a hard limit, it dispatches `BudgetExceeded` (with `wasBlocked = true`) for every blocked request.
+
 ### `BudgetThresholdReached`
 
 Fired when usage hits the warning or critical threshold:
@@ -256,8 +265,8 @@ Set global budget defaults in `config/spectra.php`. These values apply when indi
 
 ```php
 'budget' => [
-    'enabled' => true,
+    'enabled' => env('SPECTRA_BUDGET_ENABLED', true),
     'default_provider' => 'openai',
-    'default_model' => 'gpt-4',
+    'default_model' => 'gpt-5.2',
 ],
 ```

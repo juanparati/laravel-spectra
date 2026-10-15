@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spectra\Support\Tracking;
 
 use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Spectra\Data\TokenMetrics;
@@ -82,15 +83,35 @@ class RequestContext implements Arrayable
 
     public ?string $responseId = null;
 
+    /** Total input tokens, including cache reads and cache writes. */
     public int $promptTokens = 0;
 
+    /** Total output tokens, including reasoning tokens. */
     public int $completionTokens = 0;
 
-    /** Cached tokens are typically charged at a reduced rate. */
+    /** Input tokens read from the prompt cache (part of promptTokens). */
     public int $cachedTokens = 0;
 
-    /** Reasoning/thinking tokens used by models like o3, o4-mini, Claude with extended thinking. */
+    /** Reasoning/thinking tokens (part of completionTokens). */
     public int $reasoningTokens = 0;
+
+    /** Input tokens written to the prompt cache (part of promptTokens). */
+    public int $cacheWriteTokens = 0;
+
+    /** Cache writes with a 1-hour TTL (part of cacheWriteTokens). */
+    public int $cacheWrite1hTokens = 0;
+
+    /** Uncached audio input tokens (part of promptTokens). */
+    public int $audioInputTokens = 0;
+
+    /** Uncached image input tokens (part of promptTokens). */
+    public int $imageInputTokens = 0;
+
+    /** Audio output tokens (part of completionTokens). */
+    public int $audioOutputTokens = 0;
+
+    /** Image output tokens (part of completionTokens). */
+    public int $imageOutputTokens = 0;
 
     /** Duration in seconds for audio/video models that charge per minute/second. */
     public ?float $durationSeconds = null;
@@ -100,7 +121,13 @@ class RequestContext implements Arrayable
 
     public ?int $imageCount = null;
 
+    /** Total output megapixels, for models billed per megapixel. */
+    public ?float $megapixels = null;
+
     public ?int $videoCount = null;
+
+    /** Pages processed, for page-billed models (e.g. OCR). */
+    public ?int $pageCount = null;
 
     /** Billable search/rerank operations for per-search pricing (e.g. Cohere rerank). */
     public ?int $searchCount = null;
@@ -116,8 +143,24 @@ class RequestContext implements Arrayable
 
     public string $currency = 'USD';
 
-    /** Pricing tier for tiered providers (OpenAI, Anthropic). Options: batch, flex, standard, priority. */
+    /**
+     * Pricing tier the request was billed at (see PricingTier). Set explicitly
+     * (Spectra::withPricingTier(), the `pricing_tier` option) it always wins;
+     * otherwise it is filled from the response, then the request, then config.
+     */
     public ?string $pricingTier = null;
+
+    /** Pricing tier the request body asked for (e.g. `service_tier: flex`); used when the response doesn't say. */
+    public ?string $requestedPricingTier = null;
+
+    /** Cost the provider reported itself (US cents); replaces the catalog estimate when set. */
+    public ?float $reportedCostInCents = null;
+
+    /** Price multiplier for regional processing and similar surcharges (e.g. 1.1 for US-only inference). */
+    public float $costMultiplier = 1.0;
+
+    /** Generation time reported by the provider for async jobs (video, predictions), in milliseconds. */
+    public ?int $providerLatencyMs = null;
 
     public ?int $latencyMs = null;
 
@@ -149,9 +192,12 @@ class RequestContext implements Arrayable
     /** Whether ResponseProcessor has already processed this context. */
     public bool $processed = false;
 
+    /** Set when a manual Spectra::stream() tracker took over recording this streamed request. */
+    public bool $streamClaimed = false;
+
     public ?string $endpoint = null;
 
-    /** Values: 'web', 'api', 'console', 'queue'. */
+    /** Values: 'web', 'api', 'console' (queued jobs run in the console). */
     public ?string $requestSource = null;
 
     public ?string $laravelRequestId = null;
@@ -204,11 +250,15 @@ class RequestContext implements Arrayable
                 : (is_string($serverValue) ? $serverValue : (string) Str::uuid());
         }
 
-        if (config('spectra.tracking.capture_ip') && app()->has('request')) {
+        // In queued jobs and commands the bound request is a placeholder
+        // (127.0.0.1, "Symfony"), so origin is only captured for web requests.
+        $webRequest = app()->has('request') && ! app()->runningInConsole();
+
+        if (config('spectra.tracking.capture_ip') && $webRequest) {
             $this->ipAddress = request()->ip();
         }
 
-        if (config('spectra.tracking.capture_user_agent') && app()->has('request')) {
+        if (config('spectra.tracking.capture_user_agent') && $webRequest) {
             $this->userAgent = request()->userAgent();
         }
 
@@ -218,11 +268,12 @@ class RequestContext implements Arrayable
             $this->requestSource = request()->expectsJson() ? 'api' : 'web';
         }
 
-        if (config('spectra.tracking.auto_track_user') && auth()->check()) {
+        // An explicitly given trackable (per call or via Spectra::forTrackable())
+        // always wins over the signed-in user.
+        if ($this->trackableType === null && config('spectra.tracking.auto_track_user') && auth()->check()) {
             $user = auth()->user();
             if ($user !== null) {
-                $this->trackableType = get_class($user);
-                $this->trackableId = $user->getKey();
+                [$this->trackableType, $this->trackableId] = $this->trackableIdentity($user);
             }
         }
     }
@@ -262,17 +313,18 @@ class RequestContext implements Arrayable
      */
     public function setUsage(TokenMetrics|array $usage): self
     {
-        if ($usage instanceof TokenMetrics) {
-            $this->promptTokens = $usage->promptTokens;
-            $this->completionTokens = $usage->completionTokens;
-            $this->cachedTokens = $usage->cachedTokens;
-            $this->reasoningTokens = $usage->reasoningTokens ?: $this->reasoningTokens;
-        } else {
-            $this->promptTokens = $usage['prompt_tokens'] ?? $usage['input_tokens'] ?? 0;
-            $this->completionTokens = $usage['completion_tokens'] ?? $usage['output_tokens'] ?? 0;
-            $this->cachedTokens = $usage['cached_tokens'] ?? $usage['cache_read_input_tokens'] ?? 0;
-            $this->reasoningTokens = $usage['reasoning_tokens'] ?? $this->reasoningTokens;
-        }
+        $tokens = $usage instanceof TokenMetrics ? $usage : TokenMetrics::fromArray($usage);
+
+        $this->promptTokens = $tokens->promptTokens;
+        $this->completionTokens = $tokens->completionTokens;
+        $this->cachedTokens = $tokens->cachedTokens;
+        $this->reasoningTokens = $tokens->reasoningTokens ?: $this->reasoningTokens;
+        $this->cacheWriteTokens = $tokens->cacheWriteTokens;
+        $this->cacheWrite1hTokens = $tokens->cacheWrite1hTokens;
+        $this->audioInputTokens = $tokens->audioInputTokens;
+        $this->imageInputTokens = $tokens->imageInputTokens;
+        $this->audioOutputTokens = $tokens->audioOutputTokens;
+        $this->imageOutputTokens = $tokens->imageOutputTokens;
 
         if ($this->reasoningTokens > 0) {
             $this->isReasoning = true;
@@ -336,12 +388,46 @@ class RequestContext implements Arrayable
 
     public function forTrackable(mixed $trackable): self
     {
-        if (is_object($trackable) && method_exists($trackable, 'getKey')) {
-            $this->trackableType = get_class($trackable);
-            $this->trackableId = $trackable->getKey();
+        if (is_object($trackable) && ($trackable instanceof Model || method_exists($trackable, 'getKey'))) {
+            [$this->trackableType, $this->trackableId] = $this->trackableIdentity($trackable);
         }
 
         return $this;
+    }
+
+    /**
+     * Type and id to store for a trackable. Eloquent models use their morph
+     * alias, so apps with a morph map can still query their requests.
+     *
+     * @return array{0: string, 1: mixed}
+     */
+    protected function trackableIdentity(object $trackable): array
+    {
+        return match (true) {
+            $trackable instanceof Model => [$trackable->getMorphClass(), $trackable->getKey()],
+            method_exists($trackable, 'getKey') => [get_class($trackable), $trackable->getKey()],
+            method_exists($trackable, 'getAuthIdentifier') => [get_class($trackable), $trackable->getAuthIdentifier()],
+            default => [get_class($trackable), null],
+        };
+    }
+
+    /**
+     * The usage recorded so far, in the normalised TokenMetrics shape.
+     */
+    public function tokens(): TokenMetrics
+    {
+        return new TokenMetrics(
+            promptTokens: $this->promptTokens,
+            completionTokens: $this->completionTokens,
+            cachedTokens: $this->cachedTokens,
+            reasoningTokens: $this->reasoningTokens,
+            cacheWriteTokens: $this->cacheWriteTokens,
+            cacheWrite1hTokens: $this->cacheWrite1hTokens,
+            audioInputTokens: $this->audioInputTokens,
+            imageInputTokens: $this->imageInputTokens,
+            audioOutputTokens: $this->audioOutputTokens,
+            imageOutputTokens: $this->imageOutputTokens,
+        );
     }
 
     public function inConversation(string $conversationId, ?int $turn = null): self
@@ -397,6 +483,7 @@ class RequestContext implements Arrayable
             'prompt_tokens' => $this->promptTokens,
             'completion_tokens' => $this->completionTokens,
             'cached_tokens' => $this->cachedTokens,
+            'cache_write_tokens' => $this->cacheWriteTokens,
             'reasoning_tokens' => $this->reasoningTokens,
             'is_reasoning' => $this->isReasoning,
             'reasoning_effort' => $this->reasoningEffort,
@@ -406,6 +493,7 @@ class RequestContext implements Arrayable
             'input_characters' => $this->inputCharacters,
             'image_count' => $this->imageCount,
             'video_count' => $this->videoCount,
+            'page_count' => $this->pageCount,
             'expires_at' => $this->expiresAt,
             'prompt_cost' => $this->promptCost,
             'completion_cost' => $this->completionCost,

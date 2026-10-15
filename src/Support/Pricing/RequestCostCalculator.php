@@ -10,12 +10,16 @@ use Spectra\Support\Tracking\RequestContext;
 
 /**
  * Computes the full cost of a tracked request, dispatching on its pricing unit
- * (tokens, minute, second, characters, image, video, search) and adding any
- * per-tool-call surcharges.
+ * and adding any per-tool-call surcharges.
  *
  * This is the single source of truth for request cost — used both when a
  * RequestContext completes (for in-memory consumers) and when the request is
  * persisted, so the two never diverge.
+ *
+ * Order of precedence:
+ *  1. A cost the provider reported itself (OpenRouter, xAI) — exact.
+ *  2. The catalog price of the model the provider actually served (the
+ *     response snapshot), then of the model that was requested.
  */
 class RequestCostCalculator
 {
@@ -28,64 +32,82 @@ class RequestCostCalculator
      */
     public function forContext(RequestContext $context, string|PricingTier|null $pricingTier = null): array
     {
-        $model = $context->model;
-        $tier = $pricingTier instanceof PricingTier ? $pricingTier->value : $pricingTier;
-        $pricingUnit = $this->costCalculator->getPricingUnit($context->provider, $model);
+        $tier = $pricingTier ?? $context->pricingTier;
+        $model = $this->pricedModel($context);
+        $at = $context->getStartedAt();
+        $provider = $context->provider;
+        $pricingUnit = $this->costCalculator->getPricingUnit($provider, $model);
 
         $cost = match ($pricingUnit) {
-            PricingUnit::Minute->value => $this->costCalculator->calculateByDuration(
-                $context->provider,
-                $model,
-                $context->durationSeconds ?? 0,
-                $tier
-            ),
-            PricingUnit::Second->value => $this->costCalculator->calculateByDurationSeconds(
-                $context->provider,
-                $model,
-                $context->durationSeconds ?? 0,
-                $tier
-            ),
-            PricingUnit::Characters->value => $this->costCalculator->calculateByCharacters(
-                $context->provider,
-                $model,
-                $context->inputCharacters ?? 0,
-                $tier
-            ),
-            PricingUnit::Image->value => $this->costCalculator->calculateByImages(
-                $context->provider,
-                $model,
-                $context->imageCount ?? 0,
-                $tier
-            ),
-            PricingUnit::Video->value => $this->costCalculator->calculateByVideos(
-                $context->provider,
-                $model,
-                $context->videoCount ?? 0,
-                $tier
-            ),
-            PricingUnit::Search->value => $this->costCalculator->calculateBySearches(
-                $context->provider,
-                $model,
-                $context->searchCount ?? 0,
-                $tier
-            ),
-            default => $this->costCalculator->calculate(
-                $context->provider,
-                $model,
-                $context->promptTokens,
-                $context->completionTokens,
-                $context->cachedTokens,
-                $tier
-            ),
+            PricingUnit::Minute->value => $this->costCalculator->calculateByDuration($provider, $model, $context->durationSeconds ?? 0, $tier, $at),
+            PricingUnit::Second->value => $this->costCalculator->calculateByDurationSeconds($provider, $model, $context->durationSeconds ?? 0, $tier, $at),
+            PricingUnit::Characters->value => $this->costCalculator->calculateByCharacters($provider, $model, $context->inputCharacters ?? 0, $tier, $at),
+            PricingUnit::Image->value => $this->costCalculator->calculateByImages($provider, $model, $context->imageCount ?? 0, $tier, $at),
+            PricingUnit::Megapixel->value => $this->costCalculator->calculateByMegapixels($provider, $model, $context->megapixels ?? 0, $tier, $at),
+            PricingUnit::Video->value => $this->costCalculator->calculateByVideos($provider, $model, $context->videoCount ?? 0, $tier, $at),
+            PricingUnit::Search->value => $this->costCalculator->calculateBySearches($provider, $model, $context->searchCount ?? 0, $tier, $at),
+            PricingUnit::Page->value => $this->costCalculator->calculateByPages($provider, $model, $context->pageCount ?? 0, $tier, $at),
+            PricingUnit::Request->value => $this->costCalculator->calculateByRequests($provider, $model, $this->succeeded($context) ? 1 : 0, $tier, $at),
+            default => $this->costCalculator->forTokens($provider, $model, $context->tokens(), $tier, $at),
         };
+
+        // Regional surcharges (e.g. 1.1x for US-only inference) apply to the
+        // model price, not to per-call tool fees.
+        if ($context->costMultiplier !== 1.0 && $context->costMultiplier > 0) {
+            $cost = array_map(fn (float $value) => $value * $context->costMultiplier, $cost);
+        }
 
         // Add tool call surcharges (e.g. web_search_call, code_interpreter_call).
         $toolCallSurcharge = $this->calculateToolCallCost($context);
         if ($toolCallSurcharge > 0) {
-            $cost['total_cost_in_cents'] = $cost['total_cost_in_cents'] + $toolCallSurcharge;
+            $cost['total_cost_in_cents'] += $toolCallSurcharge;
+        }
+
+        if ($context->reportedCostInCents !== null) {
+            $cost = $this->applyReportedCost($cost, $this->costCalculator->convertFromUsd($context->reportedCostInCents));
         }
 
         return $cost;
+    }
+
+    /**
+     * The model id to price: the snapshot the provider served when the
+     * catalog knows it (it may differ from the request — routing, aliases,
+     * retired models that redirect), otherwise the requested model.
+     */
+    protected function pricedModel(RequestContext $context): string
+    {
+        $lookup = app(PricingLookup::class);
+
+        if ($context->snapshot !== null && $context->snapshot !== '' && $lookup->knows($context->provider, $context->snapshot)) {
+            return $context->snapshot;
+        }
+
+        return $context->model;
+    }
+
+    protected function succeeded(RequestContext $context): bool
+    {
+        return $context->errorType === null && ($context->httpStatus ?? 200) < 400;
+    }
+
+    /**
+     * Use the provider-reported total, keeping the catalog's prompt/completion
+     * split in proportion when there is one.
+     *
+     * @param  array{prompt_cost?: float, completion_cost?: float, total_cost_in_cents: float}  $estimate
+     * @return array{prompt_cost?: float, completion_cost?: float, total_cost_in_cents: float}
+     */
+    protected function applyReportedCost(array $estimate, float $reported): array
+    {
+        $estimatedTotal = $estimate['total_cost_in_cents'];
+        $ratio = $estimatedTotal > 0 ? $reported / $estimatedTotal : 0.0;
+
+        return [
+            'prompt_cost' => ($estimate['prompt_cost'] ?? 0.0) * $ratio,
+            'completion_cost' => ($estimate['completion_cost'] ?? 0.0) * $ratio,
+            'total_cost_in_cents' => $reported,
+        ];
     }
 
     /**
@@ -97,7 +119,8 @@ class RequestCostCalculator
             return 0.0;
         }
 
-        $pricing = app(PricingLookup::class)->getToolCallPricing($context->provider);
+        $lookup = app(PricingLookup::class);
+        $pricing = $lookup->getToolCallPricing($context->provider);
 
         if (empty($pricing)) {
             return 0.0;
@@ -110,6 +133,6 @@ class RequestCostCalculator
             }
         }
 
-        return $total;
+        return $total * $this->costCalculator->currencyFactor($lookup->currency($context->provider));
     }
 }

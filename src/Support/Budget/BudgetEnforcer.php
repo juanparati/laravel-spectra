@@ -7,6 +7,8 @@ namespace Spectra\Support\Budget;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Spectra\Data\BudgetLimits;
 use Spectra\Data\BudgetStatus;
 use Spectra\Data\BudgetUsage;
@@ -16,11 +18,17 @@ use Spectra\Exceptions\BudgetExceededException;
 use Spectra\Models\SpectraBudget;
 use Spectra\Models\SpectraRequest;
 
+/**
+ * Checks budgets before a request (blocking when a hard limit is reached)
+ * and announces thresholds and overruns after a request is recorded.
+ *
+ * Warning, critical and exceeded events fire once per budget, limit and
+ * period. That "already sent" mark lives in the cache, so it holds across
+ * PHP-FPM requests and queue workers, and resets when the period (day, week,
+ * month) or the limit changes.
+ */
 class BudgetEnforcer
 {
-    /** @var array<string, bool> */
-    protected array $thresholdsFired = [];
-
     public function __construct(
         protected Dispatcher $events
     ) {}
@@ -191,13 +199,10 @@ class BudgetEnforcer
                 continue;
             }
 
-            $key = $budgetable->getMorphClass().':'.$budgetable->getKey().':'.$type.':exceeded';
-
-            if (isset($this->thresholdsFired[$key])) {
+            if (! $this->fireOnce($budget, $type, 'exceeded', $limit)) {
                 continue;
             }
 
-            $this->thresholdsFired[$key] = true;
             $this->dispatchExceeded($budgetable, $budget, $type, $current, $limit, false);
         }
     }
@@ -306,11 +311,9 @@ class BudgetEnforcer
         }
 
         $percentage = ($current / $limit) * 100;
-        $key = $budgetable->getMorphClass().':'.$budgetable->getKey().':'.$limitType;
 
         if ($percentage >= $budget->warning_threshold && $percentage < $budget->critical_threshold) {
-            if (! isset($this->thresholdsFired[$key.':warning'])) {
-                $this->thresholdsFired[$key.':warning'] = true;
+            if ($this->fireOnce($budget, $limitType, 'warning', $limit)) {
                 $this->events->dispatch(new BudgetThresholdReached(
                     $budgetable,
                     $budget,
@@ -324,8 +327,7 @@ class BudgetEnforcer
         }
 
         if ($percentage >= $budget->critical_threshold && $percentage < 100) {
-            if (! isset($this->thresholdsFired[$key.':critical'])) {
-                $this->thresholdsFired[$key.':critical'] = true;
+            if ($this->fireOnce($budget, $limitType, 'critical', $limit)) {
                 $this->events->dispatch(new BudgetThresholdReached(
                     $budgetable,
                     $budget,
@@ -491,6 +493,34 @@ class BudgetEnforcer
         }
 
         return empty($percentages) ? 0.0 : max($percentages);
+    }
+
+    /**
+     * True the first time this budget / limit / level is reached in the
+     * current period; false after that until the period or the limit changes.
+     */
+    protected function fireOnce(SpectraBudget $budget, string $limitType, string $level, int $limit): bool
+    {
+        [$periodKey, $expiresAt] = $this->period($limitType);
+
+        $key = implode(':', ['spectra', 'budget', $budget->getKey(), $limitType, $level, $limit, $periodKey]);
+
+        return Cache::add($key, true, $expiresAt);
+    }
+
+    /**
+     * @return array{0: string, 1: Carbon}
+     */
+    protected function period(string $limitType): array
+    {
+        $now = now();
+
+        return match ($limitType) {
+            'daily' => [$now->format('Y-m-d'), $now->copy()->endOfDay()->addHour()],
+            'weekly' => [$now->copy()->startOfWeek()->format('Y-m-d'), $now->copy()->endOfWeek()->addHour()],
+            'monthly' => [$now->format('Y-m'), $now->copy()->endOfMonth()->addHour()],
+            default => ['all', $now->copy()->addYear()],
+        };
     }
 
     /**

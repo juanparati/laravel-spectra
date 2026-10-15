@@ -221,33 +221,35 @@ it('returns zero per-unit cost for unknown models', function () {
 it('prices the newly added openai gpt-5.4 / 5.5 models', function () {
     $calculator = new CostCalculator;
 
-    // gpt-5.5 standard: $5/MTok in, $30/MTok out → 1M+1M = 500 + 3000 cents.
-    $gpt55 = $calculator->calculate('openai', 'gpt-5.5', 1_000_000, 1_000_000, 0, PricingTier::Standard);
-    expect($gpt55['total_cost_in_cents'])->toEqual(3500);
+    // gpt-5.5 standard: $5/MTok in, $30/MTok out → 100K + 1M = 50 + 3000 cents
+    // (prompts above 272K tokens use the long-context price).
+    $gpt55 = $calculator->calculate('openai', 'gpt-5.5', 100_000, 1_000_000, 0, PricingTier::Standard);
+    expect($gpt55['total_cost_in_cents'])->toEqual(3050);
 
-    // gpt-5.4 standard: $2.50 / $15.
-    $gpt54 = $calculator->calculate('openai', 'gpt-5.4', 1_000_000, 1_000_000, 0, PricingTier::Standard);
-    expect($gpt54['total_cost_in_cents'])->toEqual(1750);
+    // gpt-5.4 standard: $2.50 / $15 → 100K + 1M = 25 + 1500.
+    $gpt54 = $calculator->calculate('openai', 'gpt-5.4', 100_000, 1_000_000, 0, PricingTier::Standard);
+    expect($gpt54['total_cost_in_cents'])->toEqual(1525);
 
-    // gpt-5.4-mini priority tier: $1.50 / $9.
-    $miniPriority = $calculator->calculate('openai', 'gpt-5.4-mini', 1_000_000, 1_000_000, 0, PricingTier::Priority);
-    expect($miniPriority['total_cost_in_cents'])->toEqual(1050);
+    // gpt-5.4-mini priority tier: $1.50 / $9 → 100K + 1M = 15 + 900.
+    $miniPriority = $calculator->calculate('openai', 'gpt-5.4-mini', 100_000, 1_000_000, 0, PricingTier::Priority);
+    expect($miniPriority['total_cost_in_cents'])->toEqual(915);
 
-    // gpt-5.5-pro standard: $30 / $180.
-    $pro = $calculator->calculate('openai', 'gpt-5.5-pro', 1_000_000, 1_000_000, 0, PricingTier::Standard);
-    expect($pro['total_cost_in_cents'])->toEqual(21000);
+    // gpt-5.5-pro standard: $30 / $180 → 100K + 1M = 300 + 18000.
+    $pro = $calculator->calculate('openai', 'gpt-5.5-pro', 100_000, 1_000_000, 0, PricingTier::Standard);
+    expect($pro['total_cost_in_cents'])->toEqual(18300);
 });
 
 it('prices the newly added xai grok-4.x models', function () {
     $calculator = new CostCalculator;
 
-    // grok-4.3: $1.25/MTok in, $2.50/MTok out → 1M+1M = 125 + 250 cents.
-    $grok = $calculator->calculate('xai', 'grok-4.3', 1_000_000, 1_000_000);
-    expect($grok['total_cost_in_cents'])->toEqual(375);
+    // grok-4.3: $1.25/MTok in, $2.50/MTok out → 100K + 1M = 12.5 + 250 cents
+    // (prompts of 200K tokens or more use the long-context price).
+    $grok = $calculator->calculate('xai', 'grok-4.3', 100_000, 1_000_000);
+    expect($grok['total_cost_in_cents'])->toEqual(262.5);
 
-    // Cached input billed at $0.20/MTok: 1M cached + 0 output = 20 cents.
-    $cached = $calculator->calculate('xai', 'grok-4.3', 1_000_000, 0, 1_000_000);
-    expect($cached['total_cost_in_cents'])->toEqual(20);
+    // Cached input billed at $0.20/MTok: 100K cached + 0 output = 2 cents.
+    $cached = $calculator->calculate('xai', 'grok-4.3', 100_000, 0, 100_000);
+    expect($cached['total_cost_in_cents'])->toEqual(2);
 });
 
 it('prices the newly added google gemini 3.x models', function () {
@@ -257,9 +259,9 @@ it('prices the newly added google gemini 3.x models', function () {
     $flash = $calculator->calculate('google', 'gemini-3.5-flash', 1_000_000, 1_000_000, 0, PricingTier::Standard);
     expect($flash['total_cost_in_cents'])->toEqual(1050);
 
-    // gemini-3.1-pro-preview priority: $3.60 in / $21.60 out.
-    $pro = $calculator->calculate('google', 'gemini-3.1-pro-preview', 1_000_000, 1_000_000, 0, PricingTier::Priority);
-    expect($pro['total_cost_in_cents'])->toEqual(2520);
+    // gemini-3.1-pro-preview priority: $3.60 in / $21.60 out (a 200K prompt stays below the long-context price).
+    $pro = $calculator->calculate('google', 'gemini-3.1-pro-preview', 200_000, 1_000_000, 0, PricingTier::Priority);
+    expect($pro['total_cost_in_cents'])->toEqual(72 + 2160);
 
     // gemini-3.1-flash-lite standard: $0.25 in / $1.50 out.
     $lite = $calculator->calculate('google', 'gemini-3.1-flash-lite', 1_000_000, 1_000_000, 0, PricingTier::Standard);

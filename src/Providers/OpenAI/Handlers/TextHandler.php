@@ -10,17 +10,30 @@ use Spectra\Contracts\ExtractsModelFromResponse;
 use Spectra\Contracts\Handler;
 use Spectra\Contracts\HasFinishReason;
 use Spectra\Contracts\MatchesResponseShape;
+use Spectra\Contracts\SkipsResponse;
 use Spectra\Contracts\StreamsResponse;
 use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\OpenAI\OpenAiUsage;
 use Spectra\Providers\OpenAI\Streaming\TextStreaming;
 use Spectra\Support\Tracking\StreamHandler;
 
-class TextHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, MatchesResponseShape, StreamsResponse
+/**
+ * Text generation: Chat Completions, legacy Completions, the Responses API
+ * and conversation compaction.
+ *
+ * A Responses request made with `background: true` answers `queued` (no
+ * usage yet); that answer is skipped and the finished response is recorded
+ * when it is fetched (see BackgroundResponseHandler).
+ */
+class TextHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, MatchesResponseShape, SkipsResponse, StreamsResponse
 {
     use ExtractsModelField;
     use MatchesEndpoints;
+
+    /** Responses API statuses that mean the response is still being generated. */
+    public const PENDING_STATUSES = ['queued', 'in_progress'];
 
     public function modelType(): ModelType
     {
@@ -33,6 +46,7 @@ class TextHandler implements ExtractsModelFromResponse, Handler, HasFinishReason
             '/v1/chat/completions',
             '/v1/completions',
             '/v1/responses',
+            '/v1/responses/compact',
         ];
     }
 
@@ -42,14 +56,24 @@ class TextHandler implements ExtractsModelFromResponse, Handler, HasFinishReason
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
+        $usage = $responseData['usage'] ?? null;
+
+        if (! is_array($usage)) {
+            return new Metrics(tokens: new TokenMetrics);
+        }
+
         return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: (int) ($responseData['usage']['prompt_tokens'] ?? $responseData['usage']['input_tokens'] ?? 0),
-                completionTokens: (int) ($responseData['usage']['completion_tokens'] ?? $responseData['usage']['output_tokens'] ?? 0),
-                cachedTokens: (int) ($responseData['usage']['prompt_tokens_details']['cached_tokens'] ?? $responseData['usage']['input_tokens_details']['cached_tokens'] ?? 0),
-                reasoningTokens: (int) ($responseData['usage']['completion_tokens_details']['reasoning_tokens'] ?? $responseData['usage']['output_tokens_details']['reasoning_tokens'] ?? 0),
-            ),
+            tokens: self::isResponsesApi($responseData) || self::isCompaction($responseData)
+                ? OpenAiUsage::fromResponses($usage)
+                : OpenAiUsage::fromAny($usage),
         );
+    }
+
+    /** @param  array<string, mixed>  $responseData */
+    public function shouldSkipResponse(array $responseData): bool
+    {
+        return self::isResponsesApi($responseData)
+            && in_array($responseData['status'] ?? null, self::PENDING_STATUSES, true);
     }
 
     /** @param  array<string, mixed>  $response */
@@ -94,16 +118,41 @@ class TextHandler implements ExtractsModelFromResponse, Handler, HasFinishReason
         return null;
     }
 
-    /** @param  array<string, mixed>  $response */
+    /**
+     * Chat Completions: the first choice's finish reason. Responses API: why
+     * an incomplete response stopped (`max_output_tokens`, `content_filter`,
+     * ...), otherwise its status (`completed`, `failed`, `cancelled`).
+     *
+     * @param  array<string, mixed>  $response
+     */
     public function extractFinishReason(array $response): ?string
     {
-        return $response['choices'][0]['finish_reason'] ?? $response['status'] ?? null;
+        if (isset($response['choices'][0]['finish_reason'])) {
+            return $response['choices'][0]['finish_reason'];
+        }
+
+        return self::responseFinishReason($response);
+    }
+
+    /**
+     * @param  array<string, mixed>  $response
+     */
+    public static function responseFinishReason(array $response): ?string
+    {
+        $status = $response['status'] ?? null;
+        $reason = $response['incomplete_details']['reason'] ?? null;
+
+        if ($status === 'incomplete' && is_string($reason) && $reason !== '') {
+            return $reason;
+        }
+
+        return is_string($status) ? $status : null;
     }
 
     /** @param  array<string, mixed>  $data */
     public function matchesResponse(array $data): bool
     {
-        return self::isResponsesApi($data) || self::isCompletionsApi($data);
+        return self::isResponsesApi($data) || self::isCompletionsApi($data) || self::isCompaction($data);
     }
 
     /** @param  array<string, mixed>  $data */
@@ -116,6 +165,16 @@ class TextHandler implements ExtractsModelFromResponse, Handler, HasFinishReason
     public static function isCompletionsApi(array $data): bool
     {
         return in_array($data['object'] ?? null, ['chat.completion', 'text_completion'], true);
+    }
+
+    /**
+     * A `/v1/responses/compact` result: billed model usage without a `model` field.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public static function isCompaction(array $data): bool
+    {
+        return ($data['object'] ?? null) === 'response.compaction';
     }
 
     /** @param  array<string, mixed>  $data */

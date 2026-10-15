@@ -1,0 +1,43 @@
+{
+    "id": "gen-1760000000-9fKq2LmZpX4rTt8YvWcB",
+    "provider": "Anthropic",
+    "model": "anthropic/claude-sonnet-4.5",
+    "object": "chat.completion",
+    "created": 1760000000,
+    "choices": [
+        {
+            "logprobs": null,
+            "finish_reason": "stop",
+            "native_finish_reason": "end_turn",
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "The contract renews on 1 March unless either side gives 60 days' notice.",
+                "refusal": null,
+                "reasoning": "The renewal clause is in section 12."
+            }
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 12000,
+        "completion_tokens": 600,
+        "total_tokens": 12600,
+        "cost": 0.0249,
+        "is_byok": false,
+        "prompt_tokens_details": {
+            "cached_tokens": 8000,
+            "cache_write_tokens": 2000,
+            "audio_tokens": 0,
+            "video_tokens": 0
+        },
+        "cost_details": {
+            "upstream_inference_cost": null,
+            "upstream_inference_prompt_cost": 0.0159,
+            "upstream_inference_completions_cost": 0.009
+        },
+        "completion_tokens_details": {
+            "reasoning_tokens": 200,
+            "image_tokens": 0
+        }
+    }
+}

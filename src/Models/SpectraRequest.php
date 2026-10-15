@@ -30,9 +30,21 @@ use Spectra\Support\ProviderRegistry;
  * @property string|null $trackable_id
  * @property array<string, mixed>|null $request
  * @property array<string, mixed>|null $response
+ * @property string|null $conversation_id
+ * @property int|null $conversation_turn
  * @property int $prompt_tokens
  * @property int $completion_tokens
+ * @property int $cached_tokens
+ * @property int $cache_write_tokens
  * @property int $reasoning_tokens
+ * @property int|null $page_count
+ * @property string|null $currency
+ * @property string|null $error_type
+ * @property string|null $error_message
+ * @property string|null $request_source
+ * @property string|null $laravel_request_id
+ * @property string|null $ip_address
+ * @property string|null $user_agent
  * @property float|null $duration_seconds
  * @property int|null $input_characters
  * @property int|null $image_count
@@ -123,6 +135,10 @@ class SpectraRequest extends Model
             'response' => 'json',
             'prompt_tokens' => 'integer',
             'completion_tokens' => 'integer',
+            'cached_tokens' => 'integer',
+            'cache_write_tokens' => 'integer',
+            'page_count' => 'integer',
+            'conversation_turn' => 'integer',
             'duration_seconds' => 'float',
             'input_characters' => 'integer',
             'image_count' => 'integer',

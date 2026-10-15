@@ -10,11 +10,20 @@ use Spectra\Contracts\ExtractsModelFromResponse;
 use Spectra\Contracts\Handler;
 use Spectra\Contracts\HasFinishReason;
 use Spectra\Contracts\MatchesResponseShape;
+use Spectra\Contracts\StreamsResponse;
 use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\Cohere\Streaming\ChatStreaming;
+use Spectra\Support\Tracking\StreamHandler;
 
-class ChatHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, MatchesResponseShape
+/**
+ * Cohere v2 Chat (`POST /v2/chat`), streamed or not.
+ *
+ * Cohere bills `usage.billed_units`, not the raw `usage.tokens` counts (which
+ * include tokens Cohere adds itself), so the billed units are recorded.
+ */
+class ChatHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, MatchesResponseShape, StreamsResponse
 {
     use ExtractsModelField;
     use MatchesEndpoints;
@@ -35,13 +44,27 @@ class ChatHandler implements ExtractsModelFromResponse, Handler, HasFinishReason
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
-        $billed = $responseData['usage']['billed_units'] ?? [];
+        $usage = is_array($responseData['usage'] ?? null) ? $responseData['usage'] : [];
 
-        return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: (int) ($billed['input_tokens'] ?? 0),
-                completionTokens: (int) ($billed['output_tokens'] ?? 0),
-            ),
+        return new Metrics(tokens: self::tokensFromUsage($usage));
+    }
+
+    /**
+     * Billed tokens from a v2 `usage` object (also used by the stream's
+     * `message-end` event). `cached_tokens` are prompt tokens that hit
+     * Cohere's cache; Cohere publishes no separate price for them.
+     *
+     * @param  array<string, mixed>  $usage
+     */
+    public static function tokensFromUsage(array $usage): TokenMetrics
+    {
+        $billed = is_array($usage['billed_units'] ?? null) ? $usage['billed_units'] : [];
+        $prompt = (int) ($billed['input_tokens'] ?? 0);
+
+        return new TokenMetrics(
+            promptTokens: $prompt,
+            completionTokens: (int) ($billed['output_tokens'] ?? 0),
+            cachedTokens: min($prompt, (int) ($usage['cached_tokens'] ?? 0)),
         );
     }
 
@@ -73,5 +96,10 @@ class ChatHandler implements ExtractsModelFromResponse, Handler, HasFinishReason
     public function matchesResponse(array $data): bool
     {
         return isset($data['message'], $data['finish_reason']);
+    }
+
+    public function streamingHandler(): StreamHandler
+    {
+        return new ChatStreaming;
     }
 }

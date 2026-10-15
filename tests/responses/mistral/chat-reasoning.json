@@ -1,0 +1,39 @@
+{
+  "id": "0d93cd053f4c4b3ca627ccd07cf2f18c",
+  "created": 1773842038,
+  "model": "mistral-large-4",
+  "usage": {
+    "prompt_tokens": 1200,
+    "total_tokens": 2314,
+    "completion_tokens": 1114,
+    "prompt_tokens_details": {
+      "cached_tokens": 1000
+    }
+  },
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "tool_calls": null,
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": [
+              {
+                "type": "text",
+                "text": "The first sister is 4, so next year she is 5 and the second sister is 10, which makes her 9 now. The third sister is 11 and John is 22."
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "John is 22 years old."
+          }
+        ]
+      }
+    }
+  ]
+}

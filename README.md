@@ -19,6 +19,10 @@ Spectra is a comprehensive Laravel package for AI observability. It helps you tr
 
 Official documentation can be found on [spectraphp.com](https://spectraphp.com).
 
+## Upgrading to 2.0
+
+Spectra 2.0 tracks streamed responses automatically, bills prompt-cache reads and writes and reasoning tokens for every provider, and updates every pricing catalog. Most apps only need to run one new migration. See the [upgrade guide](UPGRADE.md) and the [changelog](CHANGELOG.md).
+
 ## Code of Conduct
 
 While this project is not affiliated with Laravel, we follow the Laravel [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct). We expect all contributors to follow these guidelines.

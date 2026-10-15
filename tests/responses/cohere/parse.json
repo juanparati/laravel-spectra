@@ -1,0 +1,29 @@
+{
+  "id": "8f2a1c3e-4b5d-6e7f-8091-a2b3c4d5e6f7",
+  "pages": [
+    {
+      "type": "markdown",
+      "index": 0,
+      "markdown": {
+        "content": "# Sample Document\n\nCohere builds AI that understands language.\n",
+        "images": []
+      }
+    },
+    {
+      "type": "markdown",
+      "index": 1,
+      "markdown": {
+        "content": "## Page two\n\nMore text.\n",
+        "images": []
+      }
+    }
+  ],
+  "meta": {
+    "api_version": {
+      "version": "2"
+    },
+    "billed_units": {
+      "pages": 2
+    }
+  }
+}

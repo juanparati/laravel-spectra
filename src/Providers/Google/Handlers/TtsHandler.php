@@ -12,11 +12,14 @@ use Spectra\Contracts\HasMedia;
 use Spectra\Contracts\MatchesResponseShape;
 use Spectra\Data\AudioMetrics;
 use Spectra\Data\Metrics;
-use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 use Spectra\Providers\Google\ExtractsModelFromGoogleEndpoint;
+use Spectra\Providers\Google\GeminiUsage;
 use Spectra\Support\MediaPersister;
 
+/**
+ * Gemini text-to-speech: `generateContent` responses with inline audio.
+ */
 class TtsHandler implements ExtractsModelFromRequest, ExtractsModelFromResponse, Handler, HasMedia, MatchesResponseShape
 {
     use ExtractsModelFromGoogleEndpoint;
@@ -53,11 +56,7 @@ class TtsHandler implements ExtractsModelFromRequest, ExtractsModelFromResponse,
         }
 
         return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: (int) ($responseData['usageMetadata']['promptTokenCount'] ?? 0),
-                completionTokens: (int) ($responseData['usageMetadata']['candidatesTokenCount'] ?? 0),
-                cachedTokens: (int) ($responseData['usageMetadata']['cachedContentTokenCount'] ?? 0),
-            ),
+            tokens: GeminiUsage::tokens(GeminiUsage::metadata($responseData)),
             audio: new AudioMetrics(
                 inputCharacters: $inputCharacters,
             ),

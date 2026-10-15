@@ -1,0 +1,91 @@
+[{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "Thinking about the fastest route...",
+            "thought": true
+          }
+        ],
+        "role": "model"
+      },
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 800,
+    "totalTokenCount": 1300,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 800
+      }
+    ],
+    "thoughtsTokenCount": 500,
+    "serviceTier": "flex"
+  },
+  "modelVersion": "gemini-3.8-flash",
+  "responseId": "s9_vaMHeB4yR7M8Pq-i3wQo"
+},
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "Take the A10 "
+          }
+        ],
+        "role": "model"
+      },
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 800,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 1304,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 800
+      }
+    ],
+    "thoughtsTokenCount": 500,
+    "serviceTier": "flex"
+  },
+  "modelVersion": "gemini-3.8-flash",
+  "responseId": "s9_vaMHeB4yR7M8Pq-i3wQo"
+},
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "and leave before 8 am."
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 800,
+    "candidatesTokenCount": 200,
+    "totalTokenCount": 1500,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 800
+      }
+    ],
+    "thoughtsTokenCount": 500,
+    "serviceTier": "flex"
+  },
+  "modelVersion": "gemini-3.8-flash",
+  "responseId": "s9_vaMHeB4yR7M8Pq-i3wQo"
+}]

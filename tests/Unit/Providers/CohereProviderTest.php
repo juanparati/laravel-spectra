@@ -6,6 +6,7 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 use Spectra\Providers\Cohere\Handlers\ChatHandler;
+use Spectra\Providers\Cohere\Handlers\ParseHandler;
 use Spectra\Support\ProviderRegistry;
 
 it('returns cohere as provider', function () {
@@ -16,8 +17,21 @@ it('returns correct display name', function () {
     expect(app(ProviderRegistry::class)->displayName('cohere'))->toBe('Cohere');
 });
 
-it('returns correct hosts', function () {
-    expect($this->cohereProvider()->getHosts())->toBe(['api.cohere.com']);
+it('returns both API hosts', function () {
+    expect($this->cohereProvider()->getHosts())->toBe(['api.cohere.com', 'api.cohere.ai']);
+});
+
+it('resolves the parse handler', function () {
+    expect($this->cohereProvider()->resolveHandler('/v2/parse'))->toBeInstanceOf(ParseHandler::class);
+});
+
+it('streams chat through the cohere stream handler', function () {
+    $stream = (new ChatHandler)->streamingHandler();
+
+    expect($stream->text(['type' => 'content-delta', 'delta' => ['message' => ['content' => ['text' => 'Hi']]]]))->toBe('Hi')
+        ->and($stream->text(['type' => 'content-delta', 'delta' => ['message' => ['content' => ['thinking' => 'hmm']]]]))->toBeNull()
+        ->and($stream->usage(['type' => 'message-end', 'delta' => ['usage' => ['billed_units' => ['input_tokens' => 5, 'output_tokens' => 26]]]], [])['completion_tokens'])->toBe(26)
+        ->and($stream->model(['type' => 'message-start', 'id' => 'abc']))->toBe(['id' => 'abc']);
 });
 
 it('resolves chat handler for v2 chat endpoint', function () {

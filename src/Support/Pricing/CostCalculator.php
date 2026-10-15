@@ -4,10 +4,28 @@ declare(strict_types=1);
 
 namespace Spectra\Support\Pricing;
 
+use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\Log;
+use Spectra\Data\TokenMetrics;
 use Spectra\Enums\PricingTier;
 
+/**
+ * Turns usage into cost, in cents of the reporting currency
+ * (`spectra.costs.currency`).
+ *
+ * Token costs follow the TokenMetrics contract: the prompt total is split into
+ * uncached, cache-read, cache-write (5m / 1h), audio and image tokens, and the
+ * completion total into text, audio and image tokens, each billed at its own
+ * rate. A rate the catalog leaves empty falls back to the plain input or
+ * output price.
+ *
+ * @phpstan-import-type Price from PricingLookup
+ */
 class CostCalculator
 {
+    /** @var array<string, true> Currencies we already warned about (once per process). */
+    protected array $warnedCurrencies = [];
+
     /**
      * @return array{prompt_cost: float, completion_cost: float, total_cost_in_cents: float}
      */
@@ -19,11 +37,25 @@ class CostCalculator
         int $cachedTokens = 0,
         string|PricingTier|null $pricingTier = null
     ): array {
-        if (in_array($provider, ['openai', 'anthropic']) && $pricingTier === null) {
-            $pricingTier = $this->getDefaultTier($provider);
-        }
+        return $this->forTokens(
+            $provider,
+            $model,
+            new TokenMetrics(promptTokens: $promptTokens, completionTokens: $completionTokens, cachedTokens: $cachedTokens),
+            $pricingTier,
+        );
+    }
 
-        $pricing = $this->getPricing($provider, $model, $pricingTier);
+    /**
+     * @return array{prompt_cost: float, completion_cost: float, total_cost_in_cents: float}
+     */
+    public function forTokens(
+        string $provider,
+        string $model,
+        TokenMetrics $tokens,
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
+    ): array {
+        $pricing = $this->getPricing($provider, $model, $pricingTier ?? $this->getDefaultTier($provider), $tokens->promptTokens, $at);
 
         if ($pricing === null) {
             return [
@@ -33,28 +65,85 @@ class CostCalculator
             ];
         }
 
-        $regularPromptTokens = max(0, $promptTokens - $cachedTokens);
+        $remaining = max(0, $tokens->promptTokens);
+        $take = static function (int $requested) use (&$remaining): int {
+            $taken = min(max(0, $requested), $remaining);
+            $remaining -= $taken;
 
-        // Models without a cached-input rate bill cached tokens at the full
-        // input price — a conservative fallback, never an undercharge.
-        $cachedInputPrice = $pricing['cached_input'] ?? $pricing['input'];
+            return $taken;
+        };
 
-        $promptCost = ($regularPromptTokens * $pricing['input'] + $cachedTokens * $cachedInputPrice) / 1_000_000;
-        $completionCost = ($completionTokens * $pricing['output']) / 1_000_000;
+        $cached = $take($tokens->cachedTokens);
+        $writes = $take($tokens->cacheWriteTokens);
+        $writes1h = min(max(0, $tokens->cacheWrite1hTokens), $writes);
+        $audioIn = $take($tokens->audioInputTokens);
+        $imageIn = $take($tokens->imageInputTokens);
+        $regularIn = $remaining;
+
+        $input = $pricing['input'];
+        $cacheWrite5m = $pricing['cache_write_5m'] ?? $input;
+
+        $promptCost = (
+            $regularIn * $input
+            + $cached * ($pricing['cached_input'] ?? $input)
+            + ($writes - $writes1h) * $cacheWrite5m
+            + $writes1h * ($pricing['cache_write_1h'] ?? $cacheWrite5m)
+            + $audioIn * ($pricing['audio_input'] ?? $input)
+            + $imageIn * ($pricing['image_input'] ?? $input)
+        ) / 1_000_000;
+
+        $outputTotal = max(0, $tokens->completionTokens);
+        $audioOut = min(max(0, $tokens->audioOutputTokens), $outputTotal);
+        $imageOut = min(max(0, $tokens->imageOutputTokens), $outputTotal - $audioOut);
+        $regularOut = $outputTotal - $audioOut - $imageOut;
+
+        $output = $pricing['output'];
+
+        $completionCost = (
+            $regularOut * $output
+            + $audioOut * ($pricing['audio_output'] ?? $output)
+            + $imageOut * ($pricing['image_output'] ?? $output)
+        ) / 1_000_000;
 
         return [
-            'prompt_cost' => $promptCost,
-            'completion_cost' => $completionCost,
-            'total_cost_in_cents' => $promptCost + $completionCost,
+            'prompt_cost' => (float) $promptCost,
+            'completion_cost' => (float) $completionCost,
+            'total_cost_in_cents' => (float) ($promptCost + $completionCost),
         ];
     }
 
     /**
-     * @return array{input: int|float, output: int|float, cached_input?: int|float|null, cache_write_5m?: int|float|null, cache_write_1h?: int|float|null, price_per_unit?: int|float|null}|null
+     * Price row for a model, converted to the reporting currency.
+     *
+     * @return Price|null
      */
-    public function getPricing(string $provider, string $model, string|PricingTier|null $pricingTier = null): ?array
-    {
-        return app(PricingLookup::class)->get($provider, $model, $pricingTier);
+    public function getPricing(
+        string $provider,
+        string $model,
+        string|PricingTier|null $pricingTier = null,
+        ?int $promptTokens = null,
+        ?CarbonInterface $at = null,
+    ): ?array {
+        $lookup = app(PricingLookup::class);
+        $pricing = $lookup->get($provider, $model, $pricingTier, $promptTokens, $at);
+
+        if ($pricing === null) {
+            return null;
+        }
+
+        $factor = $this->currencyFactor($lookup->currency($provider));
+
+        if ($factor === 1.0) {
+            return $pricing;
+        }
+
+        foreach (['input', 'output', 'cached_input', 'cache_write_5m', 'cache_write_1h', 'price_per_unit', 'audio_input', 'audio_output', 'image_input', 'image_output'] as $field) {
+            if ($pricing[$field] !== null) {
+                $pricing[$field] *= $factor;
+            }
+        }
+
+        return $pricing;
     }
 
     public function hasPricing(string $provider, string $model, string|PricingTier|null $pricingTier = null): bool
@@ -101,24 +190,18 @@ class CostCalculator
     }
 
     /**
+     * Cost for minute-billed models (e.g. Whisper), from a duration in seconds.
+     *
      * @return array{total_cost_in_cents: float}
      */
     public function calculateByDuration(
         string $provider,
         string $model,
         float $durationSeconds,
-        ?string $pricingTier = null
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
     ): array {
-        $pricing = $this->getPricing($provider, $model, $pricingTier);
-
-        if ($pricing === null || ! isset($pricing['price_per_unit'])) {
-            return ['total_cost_in_cents' => 0.0];
-        }
-
-        $durationMinutes = $durationSeconds / 60;
-        $totalCost = $durationMinutes * $pricing['price_per_unit'];
-
-        return ['total_cost_in_cents' => $totalCost];
+        return $this->perUnit($provider, $model, $durationSeconds / 60, $pricingTier, $at);
     }
 
     /**
@@ -128,39 +211,26 @@ class CostCalculator
         string $provider,
         string $model,
         float $durationSeconds,
-        ?string $pricingTier = null
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
     ): array {
-        $pricing = $this->getPricing($provider, $model, $pricingTier);
-
-        if ($pricing === null || ! isset($pricing['price_per_unit'])) {
-            return ['total_cost_in_cents' => 0.0];
-        }
-
-        $totalCost = $durationSeconds * $pricing['price_per_unit'];
-
-        return ['total_cost_in_cents' => $totalCost];
+        return $this->perUnit($provider, $model, $durationSeconds, $pricingTier, $at);
     }
 
     /**
+     * price_per_unit for character-based models is cents per 1M characters,
+     * matching the cents-per-1M-tokens convention used everywhere else.
+     *
      * @return array{total_cost_in_cents: float}
      */
     public function calculateByCharacters(
         string $provider,
         string $model,
         int $characters,
-        ?string $pricingTier = null
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
     ): array {
-        $pricing = $this->getPricing($provider, $model, $pricingTier);
-
-        if ($pricing === null || ! isset($pricing['price_per_unit'])) {
-            return ['total_cost_in_cents' => 0.0];
-        }
-
-        // price_per_unit for character-based models is cents per 1M characters,
-        // matching the cents-per-1M-tokens convention used everywhere else.
-        $totalCost = ($characters * $pricing['price_per_unit']) / 1_000_000;
-
-        return ['total_cost_in_cents' => $totalCost];
+        return $this->perUnit($provider, $model, $characters / 1_000_000, $pricingTier, $at);
     }
 
     /**
@@ -170,17 +240,23 @@ class CostCalculator
         string $provider,
         string $model,
         int $imageCount,
-        ?string $pricingTier = null
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
     ): array {
-        $pricing = $this->getPricing($provider, $model, $pricingTier);
+        return $this->perUnit($provider, $model, $imageCount, $pricingTier, $at);
+    }
 
-        if ($pricing === null || ! isset($pricing['price_per_unit'])) {
-            return ['total_cost_in_cents' => 0.0];
-        }
-
-        $totalCost = $imageCount * $pricing['price_per_unit'];
-
-        return ['total_cost_in_cents' => $totalCost];
+    /**
+     * @return array{total_cost_in_cents: float}
+     */
+    public function calculateByMegapixels(
+        string $provider,
+        string $model,
+        float $megapixels,
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
+    ): array {
+        return $this->perUnit($provider, $model, $megapixels, $pricingTier, $at);
     }
 
     /**
@@ -190,21 +266,14 @@ class CostCalculator
         string $provider,
         string $model,
         int $videoCount,
-        ?string $pricingTier = null
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
     ): array {
-        $pricing = $this->getPricing($provider, $model, $pricingTier);
-
-        if ($pricing === null || ! isset($pricing['price_per_unit'])) {
-            return ['total_cost_in_cents' => 0.0];
-        }
-
-        $totalCost = $videoCount * $pricing['price_per_unit'];
-
-        return ['total_cost_in_cents' => $totalCost];
+        return $this->perUnit($provider, $model, $videoCount, $pricingTier, $at);
     }
 
     /**
-     * Calculate cost for search-billed models (e.g. Cohere Rerank, priced per search).
+     * Cost for search-billed models (e.g. Cohere Rerank, priced per search).
      *
      * @return array{total_cost_in_cents: float}
      */
@@ -212,17 +281,40 @@ class CostCalculator
         string $provider,
         string $model,
         int $searchCount = 1,
-        ?string $pricingTier = null
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
     ): array {
-        $pricing = $this->getPricing($provider, $model, $pricingTier);
+        return $this->perUnit($provider, $model, $searchCount, $pricingTier, $at);
+    }
 
-        if ($pricing === null || ! isset($pricing['price_per_unit'])) {
-            return ['total_cost_in_cents' => 0.0];
-        }
+    /**
+     * Cost for page-billed models (e.g. OCR).
+     *
+     * @return array{total_cost_in_cents: float}
+     */
+    public function calculateByPages(
+        string $provider,
+        string $model,
+        int $pages,
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
+    ): array {
+        return $this->perUnit($provider, $model, $pages, $pricingTier, $at);
+    }
 
-        $totalCost = $searchCount * $pricing['price_per_unit'];
-
-        return ['total_cost_in_cents' => $totalCost];
+    /**
+     * Cost for models billed a flat price per request (e.g. per song).
+     *
+     * @return array{total_cost_in_cents: float}
+     */
+    public function calculateByRequests(
+        string $provider,
+        string $model,
+        int $requests = 1,
+        string|PricingTier|null $pricingTier = null,
+        ?CarbonInterface $at = null,
+    ): array {
+        return $this->perUnit($provider, $model, $requests, $pricingTier, $at);
     }
 
     public function getPricingUnit(string $provider, string $model): string
@@ -230,10 +322,63 @@ class CostCalculator
         return app(PricingLookup::class)->getUnit($provider, $model) ?? 'tokens';
     }
 
-    protected function getDefaultTier(string $provider): PricingTier
+    /**
+     * Convert a US-cent amount (e.g. a provider-reported cost) to the
+     * reporting currency.
+     */
+    public function convertFromUsd(float $cents): float
     {
-        $tierValue = config("spectra.costs.provider_settings.{$provider}.default_tier", 'standard');
+        return $cents * $this->currencyFactor('USD');
+    }
 
-        return PricingTier::tryFrom($tierValue) ?? PricingTier::Standard;
+    /**
+     * How many units of the reporting currency one unit of $currency is worth.
+     *
+     * Rates come from `spectra.costs.exchange_rates` (e.g. ['EUR' => 1.17] when
+     * reporting in USD). A missing rate counts as 1.0 and is logged once.
+     */
+    public function currencyFactor(string $currency): float
+    {
+        $currency = strtoupper($currency);
+        $target = strtoupper((string) config('spectra.costs.currency', 'USD'));
+
+        if ($currency === $target) {
+            return 1.0;
+        }
+
+        $rate = config("spectra.costs.exchange_rates.{$currency}");
+
+        if (is_numeric($rate) && (float) $rate > 0) {
+            return (float) $rate;
+        }
+
+        if (! isset($this->warnedCurrencies[$currency])) {
+            $this->warnedCurrencies[$currency] = true;
+
+            Log::warning("Spectra: no exchange rate from {$currency} to {$target}. Add one under spectra.costs.exchange_rates; {$currency} prices are counted 1:1 until then.");
+        }
+
+        return 1.0;
+    }
+
+    /**
+     * @return array{total_cost_in_cents: float}
+     */
+    protected function perUnit(string $provider, string $model, float $quantity, string|PricingTier|null $pricingTier, ?CarbonInterface $at): array
+    {
+        $pricing = $this->getPricing($provider, $model, $pricingTier ?? $this->getDefaultTier($provider), null, $at);
+
+        if ($pricing === null || $pricing['price_per_unit'] === null) {
+            return ['total_cost_in_cents' => 0.0];
+        }
+
+        return ['total_cost_in_cents' => (float) (max(0, $quantity) * $pricing['price_per_unit'])];
+    }
+
+    protected function getDefaultTier(string $provider): PricingTier|string
+    {
+        $tierValue = config("spectra.costs.provider_settings.{$provider}.default_tier", PricingTier::Standard->value);
+
+        return PricingTier::tryFrom((string) $tierValue) ?? (string) $tierValue;
     }
 }

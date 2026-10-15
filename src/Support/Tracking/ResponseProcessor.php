@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Spectra\Support\Tracking;
 
+use Spectra\Contracts\ExtractsCostMultiplier;
 use Spectra\Contracts\ExtractsPricingTierFromResponse;
 use Spectra\Contracts\HasExpiration;
 use Spectra\Contracts\HasMedia;
+use Spectra\Contracts\HasProviderLatency;
+use Spectra\Contracts\ReportsJobFailure;
 use Spectra\Contracts\ReturnsBinaryResponse;
 use Spectra\Contracts\SkipsResponse;
 use Spectra\Data\TokenMetrics;
@@ -76,11 +79,23 @@ class ResponseProcessor
             }
         }
 
-        if ($context->pricingTier === null && $providerInstance instanceof ExtractsPricingTierFromResponse) {
-            $tier = $providerInstance->extractPricingTierFromResponse($body);
+        // The tier the provider says it served wins over what the request
+        // asked for (a priority request can be downgraded, a project can
+        // default to flex); an explicitly set tier wins over both.
+        if ($context->pricingTier === null) {
+            $responseTier = $providerInstance instanceof ExtractsPricingTierFromResponse
+                ? $providerInstance->extractPricingTierFromResponse($body)
+                : null;
+
+            $tier = $responseTier ?? $context->requestedPricingTier;
+
             if ($tier !== null) {
                 $context->withPricingTier($tier);
             }
+        }
+
+        if ($providerInstance instanceof ExtractsCostMultiplier) {
+            $context->costMultiplier = $providerInstance->extractCostMultiplier($body, $context->requestData ?? []) ?? $context->costMultiplier;
         }
 
         $metrics = $providerInstance?->extractMetrics($body, $endpoint, $context->requestData ?? []);
@@ -90,6 +105,12 @@ class ResponseProcessor
         $context->finishReason = $finishReason ?? $context->finishReason;
 
         $toolCallCounts = $this->countToolCalls($body);
+        foreach ($metrics->toolCalls ?? [] as $type => $count) {
+            if ($count > 0) {
+                $toolCallCounts[$type] = max($toolCallCounts[$type] ?? 0, $count);
+            }
+        }
+
         if (! empty($toolCallCounts)) {
             $context->hasToolCalls = true;
             $context->toolCallCounts = $toolCallCounts;
@@ -97,8 +118,16 @@ class ResponseProcessor
             $context->hasToolCalls = $this->detectToolCallsFromFinishReason($finishReason);
         }
 
+        if ($metrics?->reportedCostInCents !== null) {
+            $context->reportedCostInCents = $metrics->reportedCostInCents;
+        }
+
         if ($metrics?->image !== null) {
             $context->imageCount = $metrics->image->count;
+            $context->megapixels = $metrics->image->megapixels ?? $context->megapixels;
+        }
+        if ($metrics?->document !== null) {
+            $context->pageCount = $metrics->document->pages;
         }
         if ($metrics?->audio !== null) {
             $context->durationSeconds = $metrics->audio->durationSeconds ?? $context->durationSeconds;
@@ -124,6 +153,15 @@ class ResponseProcessor
 
         if ($handler instanceof HasExpiration) {
             $context->expiresAt = $handler->extractExpiresAt($body);
+        }
+
+        if ($handler instanceof HasProviderLatency) {
+            $context->providerLatencyMs = $handler->extractProviderLatency($body);
+        }
+
+        if ($handler instanceof ReportsJobFailure && ($failure = $handler->extractFailure($body)) !== null) {
+            $context->errorType = ProviderErrorException::class;
+            $context->errorMessage = $failure;
         }
 
         if ($handler instanceof HasMedia && config('spectra.storage.media.enabled')) {
@@ -183,7 +221,9 @@ class ResponseProcessor
      * - file_search_call: Built-in file search (OpenAI assistants)
      * - code_interpreter_call: Built-in code interpreter (OpenAI deep research)
      * - computer_call: Built-in computer use (Anthropic/OpenAI)
-     * - mcp_tool_call: MCP tool calls (OpenAI)
+     * - mcp_call / mcp_list_tools: MCP tool calls (OpenAI)
+     * - custom_tool_call, shell_call, apply_patch_call, tool_search_call: other built-in tools (OpenAI)
+     * - x_search_call: X search (xAI Responses API)
      * - image_generation_call: Built-in image generation (OpenAI)
      * - local_shell_call: Local shell tool calls (OpenAI)
      * - mcp_approval_request: MCP approval requests (OpenAI)
@@ -211,11 +251,27 @@ class ResponseProcessor
 
         // OpenAI Responses API: output[*].type — counts all output item types
         if (isset($body['output']) && is_array($body['output'])) {
+            $containers = [];
+
             foreach ($body['output'] as $item) {
-                $type = $item['type'] ?? null;
-                if ($type !== null && $this->isToolCallType($type)) {
-                    $counts[$type] = ($counts[$type] ?? 0) + 1;
+                $type = is_array($item) ? ($item['type'] ?? null) : null;
+
+                if (! is_string($type) || ! $this->isToolCallType($type)) {
+                    continue;
                 }
+
+                // Code interpreter is billed per container session, not per call.
+                if ($type === 'code_interpreter_call' && isset($item['container_id']) && is_string($item['container_id'])) {
+                    $containers[$item['container_id']] = true;
+
+                    continue;
+                }
+
+                $counts[$type] = ($counts[$type] ?? 0) + 1;
+            }
+
+            if ($containers !== []) {
+                $counts['code_interpreter_call'] = ($counts['code_interpreter_call'] ?? 0) + count($containers);
             }
         }
 
@@ -249,14 +305,20 @@ class ResponseProcessor
     {
         return in_array($type, [
             'function_call',
+            'custom_tool_call',
             'web_search_call',
             'file_search_call',
             'code_interpreter_call',
             'computer_call',
-            'mcp_tool_call',
+            'mcp_call',
+            'mcp_list_tools',
+            'mcp_approval_request',
             'image_generation_call',
             'local_shell_call',
-            'mcp_approval_request',
+            'shell_call',
+            'apply_patch_call',
+            'tool_search_call',
+            'x_search_call',
         ], true);
     }
 
@@ -379,10 +441,20 @@ class ResponseProcessor
     {
         $usage = $body['usage'] ?? [];
 
+        if (! is_array($usage)) {
+            return ['prompt_tokens' => 0, 'completion_tokens' => 0, 'cached_tokens' => 0];
+        }
+
         return [
             'prompt_tokens' => $usage['prompt_tokens'] ?? $usage['input_tokens'] ?? 0,
             'completion_tokens' => $usage['completion_tokens'] ?? $usage['output_tokens'] ?? 0,
-            'cached_tokens' => $usage['cached_tokens'] ?? $usage['cache_read_input_tokens'] ?? 0,
+            'cached_tokens' => $usage['prompt_tokens_details']['cached_tokens']
+                ?? $usage['input_tokens_details']['cached_tokens']
+                ?? $usage['cached_tokens']
+                ?? 0,
+            'reasoning_tokens' => $usage['completion_tokens_details']['reasoning_tokens']
+                ?? $usage['output_tokens_details']['reasoning_tokens']
+                ?? 0,
         ];
     }
 

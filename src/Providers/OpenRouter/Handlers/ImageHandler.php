@@ -4,32 +4,24 @@ declare(strict_types=1);
 
 namespace Spectra\Providers\OpenRouter\Handlers;
 
-use Spectra\Concerns\ExtractsModelField;
-use Spectra\Concerns\MatchesEndpoints;
-use Spectra\Contracts\ExtractsModelFromResponse;
-use Spectra\Contracts\Handler;
-use Spectra\Contracts\HasFinishReason;
 use Spectra\Contracts\HasMedia;
-use Spectra\Contracts\MatchesResponseShape;
 use Spectra\Data\ImageMetrics;
 use Spectra\Data\Metrics;
-use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 use Spectra\Support\MediaPersister;
 
-class ImageHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, HasMedia, MatchesResponseShape
+/**
+ * Images generated through OpenRouter `chat/completions` (Gemini Flash Image
+ * and other models with image output), returned in `message.images[]`.
+ *
+ * Shares the chat endpoint, so it only claims responses that carry images.
+ * Usage and the reported cost are read exactly like a chat response.
+ */
+class ImageHandler extends ChatHandler implements HasMedia
 {
-    use ExtractsModelField;
-    use MatchesEndpoints;
-
     public function modelType(): ModelType
     {
         return ModelType::Image;
-    }
-
-    public function endpoints(): array
-    {
-        return ['/api/v1/chat/completions'];
     }
 
     /**
@@ -38,14 +30,13 @@ class ImageHandler implements ExtractsModelFromResponse, Handler, HasFinishReaso
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
+        $metrics = parent::extractMetrics($requestData, $responseData);
+
         return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: (int) ($responseData['usage']['prompt_tokens'] ?? 0),
-                completionTokens: (int) ($responseData['usage']['completion_tokens'] ?? 0),
-            ),
-            image: new ImageMetrics(
-                count: $this->countImages($responseData),
-            ),
+            tokens: $metrics->tokens,
+            image: new ImageMetrics(count: $this->countImages($responseData)),
+            toolCalls: $metrics->toolCalls,
+            reportedCostInCents: $metrics->reportedCostInCents,
         );
     }
 
@@ -67,14 +58,7 @@ class ImageHandler implements ExtractsModelFromResponse, Handler, HasFinishReaso
         return ! empty($parts) ? implode("\n", $parts) : null;
     }
 
-    /** @param  array<string, mixed>  $response */
-    public function extractFinishReason(array $response): ?string
-    {
-        return $response['choices'][0]['finish_reason'] ?? null;
-    }
-
     /**
-     * OpenRouter returns images via chat/completions with images in message.images[].
      * Disambiguate from ChatHandler by detecting the images array.
      *
      * @param  array<string, mixed>  $data

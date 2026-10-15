@@ -1,162 +1,132 @@
 <script setup>
 import { ref } from 'vue';
 import { useRoute } from 'vue-router';
-import Logo from "@/components/Logo.vue";
+import Logo from '@/components/Logo.vue';
 
 const route = useRoute();
 const mobileMenuOpen = ref(false);
 
-const isActive = (name) => {
-    if (name === 'dashboard') return route.name === 'dashboard';
-    return route.name?.startsWith(name);
-};
+const items = [
+    { name: 'dashboard', match: 'dashboard', label: 'Overview', icon: 'M3.75 13.5h4.5v6.75h-4.5zM9.75 3.75h4.5v16.5h-4.5zM15.75 9h4.5v11.25h-4.5z' },
+    { name: 'requests', match: 'request', label: 'Requests', icon: 'M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h10.5' },
+    { name: 'costs', match: 'costs', label: 'Costs', icon: 'M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z' },
+    { name: 'trackables', match: 'trackable', label: 'Trackables', icon: 'M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z' },
+];
 
-const navClass = (name) => {
-    return isActive(name)
-        ? 'border-primary-500 text-gray-900 dark:text-white'
-        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200';
-};
-
-const mobileNavClass = (name) => {
-    return isActive(name)
-        ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-500 text-primary-700 dark:text-primary-400'
-        : 'border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200';
+const isActive = (match) => {
+    if (match === 'dashboard') return route.name === 'dashboard';
+    return route.name?.startsWith(match);
 };
 
 const isDark = ref(false);
 
-const toggleDarkMode = () => {
-    document.documentElement.classList.toggle('dark');
-    isDark.value = document.documentElement.classList.contains('dark');
-    localStorage.setItem('spectra-dark', isDark.value);
+const applyTheme = (dark) => {
+    document.documentElement.classList.toggle('dark', dark);
+    isDark.value = dark;
 };
 
-// Initialize dark mode
-if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem('spectra-dark');
-    if (stored === 'true' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-        document.documentElement.classList.add('dark');
-        isDark.value = true;
+const toggleDarkMode = () => {
+    applyTheme(!isDark.value);
+    try {
+        localStorage.setItem('spectra-dark', String(isDark.value));
+    } catch {
+        // Storage can be unavailable (private mode); the toggle still works for this page.
     }
+};
+
+if (typeof window !== 'undefined') {
+    let stored = null;
+    try {
+        stored = localStorage.getItem('spectra-dark');
+    } catch {
+        stored = null;
+    }
+    applyTheme(stored === 'true' || (stored === null && window.matchMedia('(prefers-color-scheme: dark)').matches));
 }
 </script>
 
 <template>
-    <nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex">
-                    <!-- Logo -->
-                    <div class="flex-shrink-0 flex items-center">
-                        <router-link :to="{ name: 'dashboard' }" class="flex items-center">
-                          <Logo class="w-40"/>
-                        </router-link>
-                    </div>
+    <nav class="sticky top-0 z-50 border-b border-gray-200/70 bg-white/80 backdrop-blur-md dark:border-gray-800/80 dark:bg-gray-950/75">
+        <div class="mx-auto flex h-14 max-w-shell items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center gap-8">
+                <router-link :to="{ name: 'dashboard' }" class="text-gray-900 dark:text-white" aria-label="Spectra home">
+                    <Logo class="w-40" />
+                </router-link>
 
-                    <!-- Desktop Navigation -->
-                    <div class="hidden sm:ml-8 sm:flex sm:space-x-1">
-                        <router-link
-                            :to="{ name: 'dashboard' }"
-                            :class="['inline-flex items-center px-4 py-2 border-b-2 text-sm font-medium transition-colors', navClass('dashboard')]"
-                        >
-                            <svg class="w-4 h-4 mr-2 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                            </svg>
-                            Dashboard
-                        </router-link>
-                        <router-link
-                            :to="{ name: 'requests' }"
-                            :class="['inline-flex items-center px-4 py-2 border-b-2 text-sm font-medium transition-colors', navClass('request')]"
-                        >
-                            <svg class="w-4 h-4 mr-2 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                            </svg>
-                            Requests
-                        </router-link>
-                        <router-link
-                            :to="{ name: 'costs' }"
-                            :class="['inline-flex items-center px-4 py-2 border-b-2 text-sm font-medium transition-colors', navClass('costs')]"
-                        >
-                            <svg class="w-4 h-4 mr-2 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Costs
-                        </router-link>
-                        <router-link
-                            :to="{ name: 'trackables' }"
-                            :class="['inline-flex items-center px-4 py-2 border-b-2 text-sm font-medium transition-colors', navClass('trackable')]"
-                        >
-                            <svg class="w-4 h-4 mr-2 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                            </svg>
-                            Trackables
-                        </router-link>
-                    </div>
-                </div>
-
-                <div class="flex items-center gap-2">
-                    <!-- Dark mode toggle -->
-                    <button
-                        @click="toggleDarkMode"
-                        class="p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700 transition-colors"
-                        :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+                <div class="hidden items-center gap-1 sm:flex">
+                    <router-link
+                        v-for="item in items"
+                        :key="item.name"
+                        :to="{ name: item.name }"
+                        :class="[
+                            'relative inline-flex h-8 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors',
+                            isActive(item.match)
+                                ? 'bg-gray-100 text-gray-900 dark:bg-white/[0.07] dark:text-white'
+                                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.04] dark:hover:text-white',
+                        ]"
                     >
-                        <svg v-if="isDark" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"/>
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
                         </svg>
-                        <svg v-else class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
-                        </svg>
-                    </button>
-
-                    <!-- Mobile menu button -->
-                    <button
-                        @click="mobileMenuOpen = !mobileMenuOpen"
-                        class="sm:hidden p-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700 transition-colors"
-                    >
-                        <svg v-if="!mobileMenuOpen" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-                        </svg>
-                        <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+                        {{ item.label }}
+                        <span
+                            v-if="isActive(item.match)"
+                            class="spectrum-bar absolute inset-x-3 -bottom-[11px] h-[2px] rounded-full"
+                            aria-hidden="true"
+                        ></span>
+                    </router-link>
                 </div>
+            </div>
+
+            <div class="flex items-center gap-1">
+                <button
+                    type="button"
+                    @click="toggleDarkMode"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white"
+                    :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+                    :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+                >
+                    <svg v-if="isDark" class="h-[18px] w-[18px]" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+                    </svg>
+                    <svg v-else class="h-[18px] w-[18px]" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+                    </svg>
+                </button>
+
+                <button
+                    type="button"
+                    @click="mobileMenuOpen = !mobileMenuOpen"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 sm:hidden dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white"
+                    aria-label="Toggle navigation"
+                    :aria-expanded="mobileMenuOpen"
+                >
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+                        <path v-if="!mobileMenuOpen" stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
+                        <path v-else stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                </button>
             </div>
         </div>
 
-        <!-- Mobile menu -->
-        <div v-show="mobileMenuOpen" class="sm:hidden border-t border-gray-200 dark:border-gray-700">
-            <div class="py-2 space-y-1">
-                <router-link
-                    :to="{ name: 'dashboard' }"
-                    @click="mobileMenuOpen = false"
-                    :class="['block pl-3 pr-4 py-3 border-l-4 text-base font-medium transition-colors', mobileNavClass('dashboard')]"
-                >
-                    Dashboard
-                </router-link>
-                <router-link
-                    :to="{ name: 'requests' }"
-                    @click="mobileMenuOpen = false"
-                    :class="['block pl-3 pr-4 py-3 border-l-4 text-base font-medium transition-colors', mobileNavClass('request')]"
-                >
-                    Requests
-                </router-link>
-                <router-link
-                    :to="{ name: 'costs' }"
-                    @click="mobileMenuOpen = false"
-                    :class="['block pl-3 pr-4 py-3 border-l-4 text-base font-medium transition-colors', mobileNavClass('costs')]"
-                >
-                    Costs
-                </router-link>
-                <router-link
-                    :to="{ name: 'trackables' }"
-                    @click="mobileMenuOpen = false"
-                    :class="['block pl-3 pr-4 py-3 border-l-4 text-base font-medium transition-colors', mobileNavClass('trackable')]"
-                >
-                    Trackables
-                </router-link>
-            </div>
+        <div v-show="mobileMenuOpen" class="border-t border-gray-200/70 px-4 py-2 sm:hidden dark:border-gray-800/80">
+            <router-link
+                v-for="item in items"
+                :key="item.name"
+                :to="{ name: item.name }"
+                @click="mobileMenuOpen = false"
+                :class="[
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium',
+                    isActive(item.match)
+                        ? 'bg-gray-100 text-gray-900 dark:bg-white/[0.07] dark:text-white'
+                        : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]',
+                ]"
+            >
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
+                </svg>
+                {{ item.label }}
+            </router-link>
         </div>
     </nav>
 </template>

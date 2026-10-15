@@ -148,14 +148,14 @@ onUnmounted(() => {
     <div class="grid grid-cols-1 md:grid-cols-6 gap-4">
         <div class="md:col-span-2">
             <div class="relative">
-                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 <input
                     v-model="filters.search"
                     type="text"
                     :placeholder="searchPlaceholder"
-                    class="form-input pl-10"
+                    class="form-input pl-9"
                 />
             </div>
         </div>
@@ -192,7 +192,7 @@ onUnmounted(() => {
             <div v-if="showAdvancedFilters" class="relative flex-1" ref="moreFiltersEl">
                 <button
                     @click="showMoreFilters = !showMoreFilters"
-                    class="btn btn-secondary w-full justify-between py-2.5"
+                    class="btn btn-secondary w-full justify-between"
                     :class="{ '!border-primary-500 !text-primary-600 dark:!text-primary-400': activeExtraFilters.length > 0 }"
                 >
                     <span class="flex items-center gap-1.5">
@@ -202,7 +202,7 @@ onUnmounted(() => {
                         Filters
                         <span
                             v-if="activeExtraFilters.length"
-                            class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
+                            class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold bg-primary-100 text-primary-700 dark:bg-primary-400/15 dark:text-primary-300"
                         >{{ activeExtraFilters.length }}</span>
                     </span>
                     <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': showMoreFilters }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -220,7 +220,7 @@ onUnmounted(() => {
                 >
                     <div
                         v-if="showMoreFilters"
-                        class="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 z-50 p-4 space-y-3"
+                        class="absolute right-0 z-50 mt-2 w-72 space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-pop dark:border-gray-800 dark:bg-gray-900"
                     >
                         <div>
                             <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Model</label>

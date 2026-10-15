@@ -7,6 +7,10 @@ const props = defineProps({
         type: String,
         required: true,
     },
+    subtitle: {
+        type: String,
+        default: null,
+    },
     period: {
         type: String,
         required: true,
@@ -49,16 +53,18 @@ const endDateModel = computed({
 </script>
 
 <template>
-    <div class="card mb-6">
-        <div class="card-header flex-col md:flex-row md:items-center gap-3">
-            <h2 class="text-lg font-semibold">{{ title }}</h2>
-            <PeriodRangePicker
-                v-model:period="periodModel"
-                v-model:start-date="startDateModel"
-                v-model:end-date="endDateModel"
-                :loading="loading"
-                @change="(payload) => emit('change', payload)"
-            />
+    <div class="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div class="min-w-0">
+            <h1 class="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">{{ title }}</h1>
+            <p v-if="subtitle" class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ subtitle }}</p>
+            <slot name="subtitle" />
         </div>
+        <PeriodRangePicker
+            v-model:period="periodModel"
+            v-model:start-date="startDateModel"
+            v-model:end-date="endDateModel"
+            :loading="loading"
+            @change="(payload) => emit('change', payload)"
+        />
     </div>
 </template>

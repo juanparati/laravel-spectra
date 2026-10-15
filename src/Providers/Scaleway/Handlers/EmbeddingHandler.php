@@ -13,6 +13,10 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 
+/**
+ * Scaleway embeddings (`/v1/embeddings`, optionally under a project id),
+ * billed per input token.
+ */
 class EmbeddingHandler implements ExtractsModelFromResponse, Handler, MatchesResponseShape
 {
     use ExtractsModelField;
@@ -25,7 +29,10 @@ class EmbeddingHandler implements ExtractsModelFromResponse, Handler, MatchesRes
 
     public function endpoints(): array
     {
-        return ['/{project_id}/v1/embeddings'];
+        return [
+            '/v1/embeddings',
+            '/{project_id}/v1/embeddings',
+        ];
     }
 
     /**

@@ -13,6 +13,14 @@ use Spectra\Data\Metrics;
 use Spectra\Enums\ModelType;
 use Spectra\Support\MediaPersister;
 
+/**
+ * Text to speech (`/v1/audio/speech`). The response is the audio file itself.
+ *
+ * tts-1 and tts-1-hd are billed per input character, which is read from the
+ * request. gpt-4o-mini-tts is billed per token, but the audio response
+ * carries no usage, so the catalog prices it per minute of generated audio
+ * (an estimate; needs getID3 to read the duration).
+ */
 class SpeechHandler implements Handler, HasMedia, ReturnsBinaryResponse
 {
     use MatchesEndpoints;
@@ -37,7 +45,7 @@ class SpeechHandler implements Handler, HasMedia, ReturnsBinaryResponse
     {
         return new Metrics(
             audio: new AudioMetrics(
-                inputCharacters: isset($requestData['input']) ? mb_strlen($requestData['input']) : null,
+                inputCharacters: is_string($requestData['input'] ?? null) ? mb_strlen($requestData['input']) : null,
             ),
         );
     }

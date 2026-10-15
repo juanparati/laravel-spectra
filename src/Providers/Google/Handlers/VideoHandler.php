@@ -19,6 +19,15 @@ use Spectra\Enums\ModelType;
 use Spectra\Providers\Google\ExtractsModelFromGoogleEndpoint;
 use Spectra\Support\MediaPersister;
 
+/**
+ * Veo video generation: the `predictLongRunning` job and the polls of its
+ * operation. Only the finished operation is recorded.
+ *
+ * The cost is per second of video, read from `parameters.durationSeconds` of
+ * the request. A poll is a separate GET without that body, so a job recorded
+ * from a poll has no duration (and no cost) unless it is tracked manually
+ * with the original request data.
+ */
 class VideoHandler implements ExtractsModelFromRequest, ExtractsModelFromResponse, Handler, HasFinishReason, HasMedia, MatchesResponseShape, SkipsResponse
 {
     use ExtractsModelFromGoogleEndpoint;
@@ -34,6 +43,8 @@ class VideoHandler implements ExtractsModelFromRequest, ExtractsModelFromRespons
         return [
             '/{version}/models/{model}:predictLongRunning',
             '/{version}/models/{model}:fetchPredictOperation',
+            // The Gemini API polls a Veo job with GET /v1beta/{operation.name}.
+            '/{version}/models/{model}/operations/{operation}',
         ];
     }
 

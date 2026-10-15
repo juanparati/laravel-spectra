@@ -4,13 +4,59 @@ declare(strict_types=1);
 
 namespace Spectra\Support\Pricing;
 
+use Carbon\CarbonInterface;
 use Spectra\Enums\PricingTier;
 use Spectra\Pricing\ProviderPricing;
 
+/**
+ * In-memory index over every configured pricing catalog.
+ *
+ * Resolves a provider/model pair (including aliases, dated snapshots and
+ * routing suffixes) to its catalog entry, and picks the price row for a tier,
+ * prompt size and request date.
+ *
+ * @phpstan-type Price array{
+ *     input: int|float,
+ *     output: int|float,
+ *     cached_input: int|float|null,
+ *     cache_write_5m: int|float|null,
+ *     cache_write_1h: int|float|null,
+ *     price_per_unit: int|float|null,
+ *     audio_input: int|float|null,
+ *     audio_output: int|float|null,
+ *     image_input: int|float|null,
+ *     image_output: int|float|null,
+ *     above_input_tokens: int|null,
+ *     since: string|null,
+ * }
+ * @phpstan-type ModelData array{
+ *     display_name: ?string,
+ *     type: string,
+ *     pricing_unit: string,
+ *     can_generate_text: bool,
+ *     can_generate_images: bool,
+ *     can_generate_video: bool,
+ *     can_generate_audio: bool,
+ *     retired_on: ?string,
+ *     tiers: array<string, list<Price>>,
+ * }
+ */
 class PricingLookup
 {
-    /** @var array<string, array{display_name: ?string, type: string, pricing_unit: string, can_generate_text: bool, can_generate_images: bool, can_generate_video: bool, can_generate_audio: bool, tiers: array<string, array{input: int|float, output: int|float, cached_input: int|float|null, cache_write_5m: int|float|null, cache_write_1h: int|float|null, price_per_unit: int|float|null}>}> */
+    /**
+     * OpenRouter-style routing suffixes that do not change the token price.
+     * `:free` is deliberately absent: free variants must not pick up paid prices.
+     */
+    protected const ROUTING_SUFFIXES = [':nitro', ':floor', ':online', ':exacto', ':thinking', ':extended', ':beta'];
+
+    /** @var array<string, ModelData> */
     protected array $models = [];
+
+    /** @var array<string, string> "provider|alias" => "provider|model" */
+    protected array $aliases = [];
+
+    /** @var array<string, string> Provider slug => catalog currency */
+    protected array $currencies = [];
 
     /** @var array<string, array<string, float>> Provider slug => tool call type => cost in cents */
     protected array $toolCallPricing = [];
@@ -25,31 +71,37 @@ class PricingLookup
     ) {}
 
     /**
-     * Get pricing for a specific model.
+     * Get the price row for a model.
      *
-     * @return array{input: int|float, output: int|float, cached_input?: int|float|null, cache_write_5m?: int|float|null, cache_write_1h?: int|float|null, price_per_unit?: int|float|null}|null
+     * @param  int|null  $promptTokens  Total prompt size, used to pick long-context prices.
+     * @param  CarbonInterface|null  $at  When the request was made, used to pick dated prices (default: now).
+     * @return Price|null
      */
-    public function get(string $provider, string $model, string|PricingTier|null $tier = null): ?array
-    {
-        $this->resolve();
-
-        $tierValue = $tier instanceof PricingTier ? $tier->value : ($tier ?? 'standard');
+    public function get(
+        string $provider,
+        string $model,
+        string|PricingTier|null $tier = null,
+        ?int $promptTokens = null,
+        ?CarbonInterface $at = null,
+    ): ?array {
         $key = $this->resolveKey($provider, $model);
 
-        $modelData = $key !== null ? $this->models[$key] : null;
-
-        if ($modelData === null) {
+        if ($key === null) {
             return null;
         }
 
-        $tierData = $modelData['tiers'][$tierValue] ?? null;
+        $tierValue = $tier instanceof PricingTier ? $tier->value : ($tier ?? PricingTier::Standard->value);
+        $tiers = $this->models[$key]['tiers'];
+        $date = ($at ?? now())->format('Y-m-d');
 
-        // Fall back to standard tier
-        if ($tierData === null && $tierValue !== 'standard') {
-            $tierData = $modelData['tiers']['standard'] ?? null;
+        $entry = $this->selectEntry($tiers[$tierValue] ?? [], $promptTokens ?? 0, $date);
+
+        // Tiers a model doesn't offer bill at its standard price.
+        if ($entry === null && $tierValue !== PricingTier::Standard->value) {
+            $entry = $this->selectEntry($tiers[PricingTier::Standard->value] ?? [], $promptTokens ?? 0, $date);
         }
 
-        return $tierData;
+        return $entry;
     }
 
     /**
@@ -58,6 +110,24 @@ class PricingLookup
     public function has(string $provider, string $model, string|PricingTier|null $tier = null): bool
     {
         return $this->get($provider, $model, $tier) !== null;
+    }
+
+    /**
+     * Whether the model is in the catalog at all (by id, alias or snapshot).
+     */
+    public function knows(string $provider, string $model): bool
+    {
+        return $this->resolveKey($provider, $model) !== null;
+    }
+
+    /**
+     * The catalog id a model resolves to (e.g. an alias resolves to its model).
+     */
+    public function canonicalModel(string $provider, string $model): ?string
+    {
+        $key = $this->resolveKey($provider, $model);
+
+        return $key !== null ? explode('|', $key, 2)[1] : null;
     }
 
     /**
@@ -91,6 +161,16 @@ class PricingLookup
     }
 
     /**
+     * The date the provider shut the model down, if it has.
+     */
+    public function getRetiredOn(string $provider, string $model): ?string
+    {
+        $key = $this->resolveKey($provider, $model);
+
+        return $key !== null ? $this->models[$key]['retired_on'] : null;
+    }
+
+    /**
      * Get the capabilities for a model.
      *
      * @return array{text: bool, images: bool, video: bool, audio: bool}
@@ -115,13 +195,23 @@ class PricingLookup
     /**
      * Get all model data for a specific provider + model pair.
      *
-     * @return array{display_name: ?string, type: string, pricing_unit: string, can_generate_text: bool, can_generate_images: bool, can_generate_video: bool, can_generate_audio: bool, tiers: array<string, array{input: int|float, output: int|float, cached_input: int|float|null, cache_write_5m: int|float|null, cache_write_1h: int|float|null, price_per_unit: int|float|null}>}|null
+     * @return ModelData|null
      */
     public function getModelData(string $provider, string $model): ?array
     {
         $key = $this->resolveKey($provider, $model);
 
         return $key !== null ? $this->models[$key] : null;
+    }
+
+    /**
+     * The currency a provider's catalog is written in (ISO 4217).
+     */
+    public function currency(string $provider): string
+    {
+        $this->resolve();
+
+        return $this->currencies[$provider] ?? 'USD';
     }
 
     /**
@@ -191,7 +281,29 @@ class PricingLookup
             }
         }
 
-        return array_unique($result);
+        return array_values(array_unique($result));
+    }
+
+    /**
+     * Pick the most specific price row: the newest `since` date that has
+     * started, then the highest prompt-size threshold the prompt exceeds.
+     *
+     * @param  list<Price>  $entries
+     * @return Price|null
+     */
+    protected function selectEntry(array $entries, int $promptTokens, string $date): ?array
+    {
+        $candidates = array_filter($entries, fn (array $entry) => ($entry['since'] === null || $entry['since'] <= $date)
+            && ($entry['above_input_tokens'] === null || $promptTokens > $entry['above_input_tokens']));
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        usort($candidates, fn (array $a, array $b) => [$b['since'] ?? '', $b['above_input_tokens'] ?? -1]
+            <=> [$a['since'] ?? '', $a['above_input_tokens'] ?? -1]);
+
+        return $candidates[0];
     }
 
     /**
@@ -205,6 +317,7 @@ class PricingLookup
 
         foreach ($this->pricingClasses as $pricing) {
             $provider = $pricing->provider();
+            $this->currencies[$provider] = strtoupper($pricing->currency());
 
             $toolPricing = $pricing->toolCallPricing();
             if (! empty($toolPricing)) {
@@ -213,19 +326,23 @@ class PricingLookup
 
             foreach ($pricing->models() as $definition) {
                 $modelArray = $definition->toModelArray();
-                $tiersArray = $definition->toTiersArray();
-
                 $key = $this->buildKey($provider, $definition->getInternalName());
 
                 $tiers = [];
-                foreach ($tiersArray as $tierData) {
-                    $tiers[$tierData['tier']] = [
+                foreach ($definition->toTiersArray() as $tierData) {
+                    $tiers[$tierData['tier']][] = [
                         'input' => $this->normalizePrice($tierData['input_price']),
                         'output' => $this->normalizePrice($tierData['output_price']),
-                        'cached_input' => $tierData['cached_input_price'] !== null ? $this->normalizePrice($tierData['cached_input_price']) : null,
-                        'cache_write_5m' => $tierData['cache_write_5m_price'] !== null ? $this->normalizePrice($tierData['cache_write_5m_price']) : null,
-                        'cache_write_1h' => $tierData['cache_write_1h_price'] !== null ? $this->normalizePrice($tierData['cache_write_1h_price']) : null,
-                        'price_per_unit' => $tierData['price_per_unit'] !== null ? $this->normalizePrice($tierData['price_per_unit']) : null,
+                        'cached_input' => $this->normalizeNullablePrice($tierData['cached_input_price']),
+                        'cache_write_5m' => $this->normalizeNullablePrice($tierData['cache_write_5m_price']),
+                        'cache_write_1h' => $this->normalizeNullablePrice($tierData['cache_write_1h_price']),
+                        'price_per_unit' => $this->normalizeNullablePrice($tierData['price_per_unit']),
+                        'audio_input' => $this->normalizeNullablePrice($tierData['audio_input_price']),
+                        'audio_output' => $this->normalizeNullablePrice($tierData['audio_output_price']),
+                        'image_input' => $this->normalizeNullablePrice($tierData['image_input_price']),
+                        'image_output' => $this->normalizeNullablePrice($tierData['image_output_price']),
+                        'above_input_tokens' => $tierData['above_input_tokens'],
+                        'since' => $tierData['since'],
                     ];
                 }
 
@@ -237,10 +354,18 @@ class PricingLookup
                     'can_generate_images' => $modelArray['can_generate_images'],
                     'can_generate_video' => $modelArray['can_generate_video'],
                     'can_generate_audio' => $modelArray['can_generate_audio'],
+                    'retired_on' => $modelArray['retired_on'],
                     'tiers' => $tiers,
                 ];
+
+                foreach ($definition->getAliases() as $alias) {
+                    $this->aliases[$this->buildKey($provider, $alias)] = $key;
+                }
             }
         }
+
+        // A real catalog entry always wins over an alias with the same id.
+        $this->aliases = array_diff_key($this->aliases, $this->models);
 
         $this->resolved = true;
     }
@@ -256,6 +381,11 @@ class PricingLookup
         return $floatValue;
     }
 
+    protected function normalizeNullablePrice(mixed $price): int|float|null
+    {
+        return $price !== null ? $this->normalizePrice($price) : null;
+    }
+
     protected function buildKey(string $provider, string $model): string
     {
         return "{$provider}|{$model}";
@@ -264,31 +394,53 @@ class PricingLookup
     /**
      * Resolve the catalog key for a provider/model pair.
      *
-     * Matches the exact model string first. If that misses, it retries with any
-     * trailing snapshot-date suffix stripped (e.g. `claude-opus-4-8-20260528` →
-     * `claude-opus-4-8`, or `gpt-4o-2024-08-06` → `gpt-4o`), so an undated
-     * catalog entry still matches the dated model id the API returns.
+     * Tries, in order: the exact id, the id without a routing suffix
+     * (`anthropic/claude-sonnet-4.5:nitro`), then each of those without a
+     * trailing snapshot date (`claude-opus-4-8-20260528` → `claude-opus-4-8`,
+     * `gpt-4o-2024-08-06` → `gpt-4o`) — each checked as a catalog id and as an
+     * alias. An explicit catalog entry for a dated snapshot always wins,
+     * because the exact id is matched first.
      */
     protected function resolveKey(string $provider, string $model): ?string
     {
         $this->resolve();
 
-        $key = $this->buildKey($provider, $model);
+        foreach ($this->candidateIds($model) as $candidate) {
+            $key = $this->buildKey($provider, $candidate);
 
-        if (isset($this->models[$key])) {
-            return $key;
-        }
+            if (isset($this->models[$key])) {
+                return $key;
+            }
 
-        $base = preg_replace('/-(\d{8}|\d{4}-\d{2}-\d{2})$/', '', $model);
-
-        if (is_string($base) && $base !== $model) {
-            $baseKey = $this->buildKey($provider, $base);
-
-            if (isset($this->models[$baseKey])) {
-                return $baseKey;
+            if (isset($this->aliases[$key])) {
+                return $this->aliases[$key];
             }
         }
 
         return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function candidateIds(string $model): array
+    {
+        $candidates = [$model];
+
+        foreach (self::ROUTING_SUFFIXES as $suffix) {
+            if (str_ends_with($model, $suffix)) {
+                $candidates[] = substr($model, 0, -strlen($suffix));
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            $base = preg_replace('/-(\d{8}|\d{4}-\d{2}-\d{2})$/', '', $candidate);
+
+            if (is_string($base) && $base !== $candidate) {
+                $candidates[] = $base;
+            }
+        }
+
+        return array_values(array_unique($candidates));
     }
 }

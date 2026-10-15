@@ -1,0 +1,49 @@
+{
+    "audio_base64": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYxLjcuMTAwAAAAAAAAAAAAAAD/+0DAAAAAAAAAAAAAAAAAAAAAAABJbmZvAAAADwAAAAMAAAGQ",
+    "alignment": {
+        "characters": [
+            "H",
+            "e",
+            "l",
+            "l",
+            "o"
+        ],
+        "character_start_times_seconds": [
+            0.0,
+            0.1,
+            0.2,
+            0.3,
+            0.4
+        ],
+        "character_end_times_seconds": [
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5
+        ]
+    },
+    "normalized_alignment": {
+        "characters": [
+            "H",
+            "e",
+            "l",
+            "l",
+            "o"
+        ],
+        "character_start_times_seconds": [
+            0.0,
+            0.1,
+            0.2,
+            0.3,
+            0.4
+        ],
+        "character_end_times_seconds": [
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5
+        ]
+    }
+}

@@ -15,8 +15,13 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 use Spectra\Providers\Google\ExtractsModelFromGoogleEndpoint;
+use Spectra\Providers\Google\GeminiUsage;
 use Spectra\Support\MediaPersister;
 
+/**
+ * Gemini image generation (inline image parts of `generateContent`) and
+ * Imagen `generateImages` responses.
+ */
 class ImageHandler implements ExtractsModelFromRequest, ExtractsModelFromResponse, Handler, HasMedia, MatchesResponseShape
 {
     use ExtractsModelFromGoogleEndpoint;
@@ -58,15 +63,29 @@ class ImageHandler implements ExtractsModelFromRequest, ExtractsModelFromRespons
             }
         }
 
+        $usage = GeminiUsage::metadata($responseData);
+        $tokens = GeminiUsage::tokens($usage);
+
+        // Image tokens bill at the image output rate. Without a per-modality
+        // breakdown, the candidate tokens of a response that produced images
+        // are taken as image tokens (thinking tokens stay at the text rate).
+        if ($imageCount > 0 && $tokens->imageOutputTokens === 0 && ! isset($usage['candidatesTokensDetails'])) {
+            $tokens = new TokenMetrics(
+                promptTokens: $tokens->promptTokens,
+                completionTokens: $tokens->completionTokens,
+                cachedTokens: $tokens->cachedTokens,
+                reasoningTokens: $tokens->reasoningTokens,
+                audioInputTokens: $tokens->audioInputTokens,
+                imageOutputTokens: $tokens->completionTokens - $tokens->reasoningTokens,
+            );
+        }
+
         return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: (int) ($responseData['usageMetadata']['promptTokenCount'] ?? 0),
-                completionTokens: (int) ($responseData['usageMetadata']['candidatesTokenCount'] ?? 0),
-                cachedTokens: (int) ($responseData['usageMetadata']['cachedContentTokenCount'] ?? 0),
-            ),
+            tokens: $tokens,
             image: new ImageMetrics(
                 count: $imageCount,
             ),
+            toolCalls: GeminiUsage::groundingCalls($responseData),
         );
     }
 

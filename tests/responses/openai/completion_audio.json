@@ -1,0 +1,45 @@
+{
+  "id": "chatcmpl-AUD10a1b2c3d4e5f6",
+  "object": "chat.completion",
+  "created": 1792051500,
+  "model": "gpt-audio-1.5",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "audio": {
+          "id": "audio_6f5e4d3c2b1a",
+          "data": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=",
+          "expires_at": 1792055100,
+          "transcript": "Your order ships tomorrow."
+        },
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1200,
+    "completion_tokens": 800,
+    "total_tokens": 2000,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 1000,
+      "text_tokens": 200,
+      "image_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 700,
+      "text_tokens": 100,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": null
+}

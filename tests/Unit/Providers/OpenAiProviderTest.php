@@ -10,6 +10,7 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Data\VideoMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\OpenAI\Handlers\BackgroundResponseHandler;
 use Spectra\Providers\OpenAI\Handlers\EmbeddingHandler;
 use Spectra\Providers\OpenAI\Handlers\ImageHandler;
 use Spectra\Providers\OpenAI\Handlers\ResponsesImageHandler;
@@ -17,6 +18,9 @@ use Spectra\Providers\OpenAI\Handlers\SpeechHandler;
 use Spectra\Providers\OpenAI\Handlers\TextHandler;
 use Spectra\Providers\OpenAI\Handlers\TranscriptionHandler;
 use Spectra\Providers\OpenAI\Handlers\VideoHandler;
+use Spectra\Providers\OpenAI\OpenAI;
+use Spectra\Providers\OpenAI\OpenAiUsage;
+use Spectra\Providers\OpenAI\Streaming\TextStreaming;
 
 it('extracts usage from completions api response', function () {
     $response = json_decode(file_get_contents(__DIR__.'/../../responses/openai/completion.json'), true);
@@ -794,3 +798,149 @@ it('extracts image metrics via provider for responses endpoint with image genera
     expect($metrics->tokens)->toBeInstanceOf(TokenMetrics::class);
     expect($metrics->tokens->promptTokens)->toBe(50);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Spectra 2.0: tiers, usage normalisation, background responses
+|--------------------------------------------------------------------------
+*/
+
+it('maps openai service tiers to pricing tiers', function (?string $serviceTier, ?string $expected) {
+    expect(OpenAI::pricingTierFor($serviceTier))->toBe($expected);
+})->with([
+    'default' => ['default', 'standard'],
+    'auto' => ['auto', 'standard'],
+    'scale' => ['scale', 'standard'],
+    'flex' => ['flex', 'flex'],
+    'priority' => ['priority', 'priority'],
+    'fast is the renamed priority' => ['fast', 'priority'],
+    'ultrafast' => ['ultrafast', 'ultrafast'],
+    'batch' => ['batch', 'batch'],
+    'unknown' => ['turbo', null],
+    'missing' => [null, null],
+]);
+
+it('reads the hd image tier from the request quality', function () {
+    $provider = $this->openAiProvider();
+
+    expect($provider->extractPricingTierFromRequest(['model' => 'dall-e-3', 'quality' => 'hd']))->toBe('hd')
+        ->and($provider->extractPricingTierFromRequest(['model' => 'gpt-image-1', 'quality' => 'high']))->toBeNull()
+        ->and($provider->extractPricingTierFromRequest(['service_tier' => 'fast']))->toBe('priority');
+});
+
+it('extracts image input and output tokens from gpt-image usage', function () {
+    $response = json_decode(file_get_contents(__DIR__.'/../../responses/openai/image_generation_with_usage.json'), true);
+
+    $tokens = (new ImageHandler)->extractMetrics([], $response)->tokens;
+
+    expect($tokens->imageInputTokens)->toBe(0)
+        ->and($tokens->imageOutputTokens)->toBe(1056)
+        ->and($tokens->completionTokens)->toBe(1433);
+});
+
+it('counts audio and image input as uncached tokens', function () {
+    $tokens = OpenAiUsage::fromResponses([
+        'input_tokens' => 1000,
+        'input_tokens_details' => [
+            'cached_tokens' => 300,
+            'audio_tokens' => 400,
+            'image_tokens' => 200,
+            'cached_tokens_details' => ['audio_tokens' => 100, 'image_tokens' => 50],
+        ],
+        'output_tokens' => 80,
+        'output_tokens_details' => ['reasoning_tokens' => 30, 'audio_tokens' => 40],
+    ]);
+
+    expect($tokens->promptTokens)->toBe(1000)
+        ->and($tokens->cachedTokens)->toBe(300)
+        ->and($tokens->audioInputTokens)->toBe(300)
+        ->and($tokens->imageInputTokens)->toBe(150)
+        ->and($tokens->completionTokens)->toBe(80)
+        ->and($tokens->reasoningTokens)->toBe(30)
+        ->and($tokens->audioOutputTokens)->toBe(40);
+});
+
+it('reads chat completions cache writes and audio tokens', function () {
+    $tokens = OpenAiUsage::fromAny([
+        'prompt_tokens' => 500,
+        'completion_tokens' => 70,
+        'prompt_tokens_details' => ['cached_tokens' => 100, 'cache_write_tokens' => 200, 'audio_tokens' => 50],
+        'completion_tokens_details' => ['reasoning_tokens' => 20, 'audio_tokens' => 10],
+    ]);
+
+    expect($tokens->cacheWriteTokens)->toBe(200)
+        ->and($tokens->cachedTokens)->toBe(100)
+        ->and($tokens->audioInputTokens)->toBe(50)
+        ->and($tokens->audioOutputTokens)->toBe(10)
+        ->and($tokens->reasoningTokens)->toBe(20);
+});
+
+it('skips responses that are still queued or in progress', function (string $status, bool $skipped) {
+    expect((new TextHandler)->shouldSkipResponse(['object' => 'response', 'status' => $status]))->toBe($skipped);
+})->with([
+    'queued' => ['queued', true],
+    'in_progress' => ['in_progress', true],
+    'completed' => ['completed', false],
+    'incomplete' => ['incomplete', false],
+    'failed' => ['failed', false],
+]);
+
+it('does not skip chat completions', function () {
+    expect((new TextHandler)->shouldSkipResponse(['object' => 'chat.completion']))->toBeFalse();
+});
+
+it('reports why an incomplete response stopped', function () {
+    $finishReason = (new TextHandler)->extractFinishReason([
+        'object' => 'response',
+        'status' => 'incomplete',
+        'incomplete_details' => ['reason' => 'content_filter'],
+    ]);
+
+    expect($finishReason)->toBe('content_filter');
+});
+
+it('routes background polls and cancels to the background handler', function () {
+    $provider = $this->openAiProvider();
+
+    expect($provider->resolveHandler('/v1/responses/resp_abc123'))->toBeInstanceOf(BackgroundResponseHandler::class)
+        ->and($provider->resolveHandler('/v1/responses/resp_abc123/cancel'))->toBeInstanceOf(BackgroundResponseHandler::class)
+        ->and($provider->resolveHandler('/v1/responses/compact'))->toBeInstanceOf(TextHandler::class)
+        ->and($provider->resolveHandler('/v1/responses/compact'))->not->toBeInstanceOf(BackgroundResponseHandler::class)
+        ->and($provider->resolveHandler('/v1/responses/resp_abc123/input_items'))->toBeNull();
+});
+
+it('records only finished background responses', function () {
+    $handler = new BackgroundResponseHandler;
+
+    expect($handler->shouldSkipResponse(['object' => 'response', 'background' => true, 'status' => 'in_progress']))->toBeTrue()
+        ->and($handler->shouldSkipResponse(['object' => 'response', 'background' => true, 'status' => 'completed']))->toBeFalse()
+        ->and($handler->shouldSkipResponse(['object' => 'response', 'background' => true, 'status' => 'cancelled']))->toBeFalse()
+        ->and($handler->shouldSkipResponse(['object' => 'response', 'background' => false, 'status' => 'completed']))->toBeTrue()
+        ->and($handler->shouldSkipResponse(['object' => 'response', 'deleted' => true]))->toBeTrue()
+        ->and($handler->shouldSkipResponse(['object' => 'response.input_tokens', 'input_tokens' => 11]))->toBeTrue();
+});
+
+it('never claims a response by shape for background polling', function () {
+    $response = json_decode(file_get_contents(__DIR__.'/../../responses/openai/response.json'), true);
+
+    expect($this->openAiProvider()->resolveHandler('', $response))->toBeInstanceOf(TextHandler::class)
+        ->and($this->openAiProvider()->resolveHandler('', $response))->not->toBeInstanceOf(BackgroundResponseHandler::class);
+});
+
+it('reads usage from every terminal responses stream event', function (string $event) {
+    $streaming = new TextStreaming;
+
+    $usage = $streaming->usage([
+        'type' => $event,
+        'response' => [
+            'status' => 'incomplete',
+            'service_tier' => 'default',
+            'usage' => ['input_tokens' => 10, 'output_tokens' => 5, 'input_tokens_details' => ['cached_tokens' => 4]],
+        ],
+    ], []);
+
+    expect($usage['prompt_tokens'])->toBe(10)
+        ->and($usage['completion_tokens'])->toBe(5)
+        ->and($usage['cached_tokens'])->toBe(4)
+        ->and($usage['pricing_tier'])->toBe('standard');
+})->with(['response.completed', 'response.incomplete', 'response.failed']);

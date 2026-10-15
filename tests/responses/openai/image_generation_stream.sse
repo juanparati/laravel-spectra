@@ -1,0 +1,6 @@
+event: image_generation.partial_image
+data: {"type":"image_generation.partial_image","b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==","created_at":1792052000,"size":"1024x1024","quality":"medium","background":"opaque","output_format":"png","partial_image_index":0}
+
+event: image_generation.completed
+data: {"type":"image_generation.completed","b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==","created_at":1792052000,"size":"1024x1024","quality":"medium","background":"opaque","output_format":"png","usage":{"total_tokens":1172,"input_tokens":16,"output_tokens":1156,"input_tokens_details":{"text_tokens":16,"image_tokens":0}}}
+

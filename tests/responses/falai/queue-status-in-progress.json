@@ -1,0 +1,15 @@
+{
+    "status": "IN_PROGRESS",
+    "request_id": "764cabcf-b745-4b3e-ae38-1200304cf45b",
+    "response_url": "https://queue.fal.run/fal-ai/flux/dev/requests/764cabcf-b745-4b3e-ae38-1200304cf45b",
+    "logs": [
+        {
+            "message": "Loading model weights...",
+            "timestamp": "2026-10-15T10:30:01.123Z"
+        },
+        {
+            "message": "Generating image...",
+            "timestamp": "2026-10-15T10:30:02.456Z"
+        }
+    ]
+}

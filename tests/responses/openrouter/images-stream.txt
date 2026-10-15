@@ -1,0 +1,6 @@
+data: {"type":"image_generation.partial_image","b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==","partial_image_index":0}
+
+data: {"type":"image_generation.completed","b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==","created":1760000600,"media_type":"image/png","usage":{"prompt_tokens":20,"completion_tokens":4160,"total_tokens":4180,"completion_tokens_details":{"image_tokens":4160},"cost":0.16651,"is_byok":false,"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0001,"upstream_inference_completions_cost":0.1664}}}
+
+data: [DONE]
+

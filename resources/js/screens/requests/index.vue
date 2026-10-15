@@ -208,6 +208,7 @@ onUnmounted(() => {
         <!-- Header -->
         <PageRangeHeader
             title="Requests"
+            subtitle="Every tracked call to an AI provider"
             v-model:period="period"
             v-model:start-date="startDate"
             v-model:end-date="endDate"
@@ -216,8 +217,8 @@ onUnmounted(() => {
         />
 
         <!-- Filters -->
-        <div class="card mb-6">
-            <div class="card-body">
+        <div class="card mb-4">
+            <div class="px-4 py-3.5">
                 <RequestFilters
                     v-model:filters="filters"
                     :providers="providers"
@@ -274,14 +275,14 @@ onUnmounted(() => {
                     </thead>
                     <tbody>
                         <template v-if="loading">
-                            <tr v-for="i in 10" :key="i" class="border-b border-gray-100 dark:border-gray-700/50">
-                                <td class="px-5 py-4"><div class="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div></td>
-                                <td class="px-5 py-4"><div class="flex gap-1"><div class="h-5 w-16 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse"></div></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-12 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-14 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                <td class="px-5 py-4"><div class="h-6 w-20 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse"></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-20 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
+                            <tr v-for="i in 10" :key="i" class="border-b border-gray-100 dark:border-gray-800">
+                                <td class="px-5 py-4"><div class="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"></div></td>
+                                <td class="px-5 py-4"><div class="flex gap-1"><div class="h-5 w-16 bg-gray-200 dark:bg-gray-800 rounded-full animate-pulse"></div></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-12 bg-gray-200 dark:bg-gray-800 rounded animate-pulse ml-auto"></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-16 bg-gray-200 dark:bg-gray-800 rounded animate-pulse ml-auto"></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-14 bg-gray-200 dark:bg-gray-800 rounded animate-pulse ml-auto"></div></td>
+                                <td class="px-5 py-4"><div class="h-6 w-20 bg-gray-200 dark:bg-gray-800 rounded-full animate-pulse"></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-20 bg-gray-200 dark:bg-gray-800 rounded animate-pulse ml-auto"></div></td>
                             </tr>
                         </template>
                         <template v-else>
@@ -301,7 +302,7 @@ onUnmounted(() => {
                                         <span class="font-medium text-gray-900 dark:text-white">{{ request.model }}</span>
                                         <span
                                             v-if="request.model_type"
-                                            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 shrink-0"
+                                            class="badge badge-secondary shrink-0"
                                         >{{ request.model_type }}</span>
                                         <span
                                             v-if="request.is_streaming"
@@ -332,13 +333,11 @@ onUnmounted(() => {
                                         <span
                                             v-for="tag in request.tags.slice(0, 3)"
                                             :key="tag"
-                                            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
-                                        >
-                                            {{ tag }}
-                                        </span>
+                                            class="badge badge-secondary"
+                                        >#{{ tag }}</span>
                                         <span
                                             v-if="request.tags.length > 3"
-                                            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+                                            class="badge badge-secondary"
                                         >
                                             +{{ request.tags.length - 3 }}
                                         </span>
@@ -383,10 +382,10 @@ onUnmounted(() => {
             </div>
 
             <!-- Pagination -->
-            <div class="card-body border-t border-gray-100 dark:border-gray-700">
+            <div class="card-body border-t border-gray-100 dark:border-gray-800">
                 <div class="flex items-center justify-between">
                     <div class="text-sm text-gray-500 dark:text-gray-400">
-                        <span v-if="loading" class="inline-block w-48 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></span>
+                        <span v-if="loading" class="inline-block w-48 h-4 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"></span>
                         <span v-else>
                             Showing page <span class="font-medium text-gray-700 dark:text-gray-300">{{ pagination.current_page }}</span>
                             of <span class="font-medium text-gray-700 dark:text-gray-300">{{ pagination.last_page }}</span>

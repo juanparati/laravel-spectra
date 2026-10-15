@@ -6,9 +6,14 @@ namespace Spectra\Providers\Cohere;
 
 use Spectra\Providers\Cohere\Handlers\ChatHandler;
 use Spectra\Providers\Cohere\Handlers\EmbeddingHandler;
+use Spectra\Providers\Cohere\Handlers\ParseHandler;
 use Spectra\Providers\Cohere\Handlers\RerankHandler;
 use Spectra\Providers\Provider;
 
+/**
+ * Cohere: Chat, Embed, Rerank and Parse. The API answers on both
+ * `api.cohere.com` and `api.cohere.ai` (the docs use either).
+ */
 class Cohere extends Provider
 {
     public function getProvider(): string
@@ -18,7 +23,7 @@ class Cohere extends Provider
 
     public function getHosts(): array
     {
-        return ['api.cohere.com'];
+        return ['api.cohere.com', 'api.cohere.ai'];
     }
 
     public function handlers(): array
@@ -27,6 +32,7 @@ class Cohere extends Provider
             app(ChatHandler::class),
             app(EmbeddingHandler::class),
             app(RerankHandler::class),
+            app(ParseHandler::class),
         ];
     }
 }

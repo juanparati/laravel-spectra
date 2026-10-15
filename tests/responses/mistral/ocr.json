@@ -1,0 +1,28 @@
+{
+  "pages": [
+    {
+      "index": 0,
+      "markdown": "# Annual Report 2026\n\nRevenue grew 12% year over year.",
+      "images": [],
+      "dimensions": {"dpi": 200, "height": 2200, "width": 1700}
+    },
+    {
+      "index": 1,
+      "markdown": "## Outlook\n\nWe expect steady growth.",
+      "images": [],
+      "dimensions": {"dpi": 200, "height": 2200, "width": 1700}
+    },
+    {
+      "index": 2,
+      "markdown": "| Quarter | Revenue |\n| --- | --- |\n| Q1 | 1.2M |",
+      "images": [],
+      "dimensions": {"dpi": 200, "height": 2200, "width": 1700}
+    }
+  ],
+  "model": "mistral-ocr-4-1",
+  "document_annotation": null,
+  "usage_info": {
+    "pages_processed": 3,
+    "doc_size_bytes": 184233
+  }
+}

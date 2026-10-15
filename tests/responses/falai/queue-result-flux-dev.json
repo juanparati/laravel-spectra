@@ -1,0 +1,25 @@
+{
+    "images": [
+        {
+            "url": "https://v3.fal.media/files/rabbit/abc123.jpeg",
+            "width": 1024,
+            "height": 768,
+            "content_type": "image/jpeg"
+        },
+        {
+            "url": "https://v3.fal.media/files/rabbit/def456.jpeg",
+            "width": 1920,
+            "height": 1080,
+            "content_type": "image/jpeg"
+        }
+    ],
+    "timings": {
+        "inference": 3.42
+    },
+    "seed": 42,
+    "has_nsfw_concepts": [
+        false,
+        false
+    ],
+    "prompt": "a sunset over mountains"
+}

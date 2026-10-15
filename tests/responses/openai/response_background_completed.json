@@ -1,0 +1,65 @@
+{
+  "id": "resp_bg_7a6b5c4d3e2f1a0b",
+  "object": "response",
+  "created_at": 1792051600,
+  "status": "completed",
+  "background": true,
+  "completed_at": 1792051780,
+  "error": null,
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "model": "gpt-5.5-pro",
+  "output": [
+    {
+      "id": "rs_bg_01",
+      "type": "reasoning",
+      "summary": []
+    },
+    {
+      "id": "msg_bg_01",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "logprobs": [],
+          "text": "Proof complete: the bound holds for all n ≥ 3."
+        }
+      ]
+    }
+  ],
+  "parallel_tool_calls": true,
+  "previous_response_id": null,
+  "reasoning": {
+    "effort": "high",
+    "summary": null
+  },
+  "service_tier": "flex",
+  "store": true,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "text"
+    }
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_p": 1.0,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 6000,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 40000,
+    "output_tokens_details": {
+      "reasoning_tokens": 38000
+    },
+    "total_tokens": 46000
+  },
+  "user": null,
+  "metadata": {}
+}

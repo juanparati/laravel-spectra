@@ -5,31 +5,36 @@ declare(strict_types=1);
 namespace Spectra\Providers\Replicate\Handlers;
 
 use Illuminate\Support\Facades\Http;
-use Spectra\Concerns\ExtractsModelField;
-use Spectra\Concerns\MatchesParametricEndpoints;
+use Spectra\Contracts\ExtractsModelFromRequest;
 use Spectra\Contracts\ExtractsModelFromResponse;
 use Spectra\Contracts\Handler;
 use Spectra\Contracts\HasFinishReason;
 use Spectra\Contracts\HasMedia;
+use Spectra\Contracts\HasProviderLatency;
 use Spectra\Contracts\MatchesResponseShape;
+use Spectra\Contracts\ReportsJobFailure;
+use Spectra\Contracts\SkipsResponse;
 use Spectra\Data\Metrics;
 use Spectra\Data\VideoMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\Replicate\Concerns\HandlesPredictions;
 use Spectra\Support\MediaPersister;
 
-class VideoHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, HasMedia, MatchesResponseShape
+/**
+ * Replicate predictions that produce a video.
+ *
+ * Video models bill per second of output, so the length is taken from the
+ * prediction input: `duration` (Veo, Kling, ...) or `num_frames` divided by
+ * `frames_per_second` / `fps` (Wan). Replicate echoes the input in every
+ * response, so polls get it too.
+ */
+class VideoHandler implements ExtractsModelFromRequest, ExtractsModelFromResponse, Handler, HasFinishReason, HasMedia, HasProviderLatency, MatchesResponseShape, ReportsJobFailure, SkipsResponse
 {
-    use ExtractsModelField;
-    use MatchesParametricEndpoints;
+    use HandlesPredictions;
 
     public function modelType(): ModelType
     {
         return ModelType::Video;
-    }
-
-    public function endpoints(): array
-    {
-        return ['/v1/models/{owner}/{model}/predictions'];
     }
 
     /**
@@ -38,9 +43,12 @@ class VideoHandler implements ExtractsModelFromResponse, Handler, HasFinishReaso
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
+        $succeeded = ($responseData['status'] ?? null) === 'succeeded' && $this->outputUrls($responseData) !== [];
+
         return new Metrics(
             video: new VideoMetrics(
-                count: 1,
+                count: $succeeded ? count($this->outputUrls($responseData)) : 0,
+                durationSeconds: $succeeded ? $this->durationSeconds($this->predictionInput($requestData, $responseData)) : null,
             ),
         );
     }
@@ -48,36 +56,15 @@ class VideoHandler implements ExtractsModelFromResponse, Handler, HasFinishReaso
     /** @param  array<string, mixed>  $response */
     public function extractResponse(array $response): ?string
     {
-        $output = $response['output'] ?? null;
+        $urls = $this->outputUrls($response);
 
-        if (is_string($output) && filter_var($output, FILTER_VALIDATE_URL)) {
-            return $output;
-        }
-
-        return null;
-    }
-
-    /** @param  array<string, mixed>  $response */
-    public function extractFinishReason(array $response): ?string
-    {
-        return $response['status'] ?? null;
+        return $urls !== [] ? implode("\n", $urls) : null;
     }
 
     /** @param  array<string, mixed>  $data */
     public function matchesResponse(array $data): bool
     {
-        if (! isset($data['urls'], $data['status'])) {
-            return false;
-        }
-
-        $output = $data['output'] ?? null;
-
-        // Video models output a single URL string
-        if (is_string($output) && filter_var($output, FILTER_VALIDATE_URL)) {
-            return true;
-        }
-
-        return false;
+        return $this->predictionKind($data) === 'video';
     }
 
     /**
@@ -86,21 +73,50 @@ class VideoHandler implements ExtractsModelFromResponse, Handler, HasFinishReaso
      */
     public function storeMedia(string $requestId, array $responseData, ?string $rawBody = null): array
     {
-        $output = $responseData['output'] ?? null;
+        $persister = app(MediaPersister::class);
+        $stored = [];
 
-        if (! is_string($output) || ! filter_var($output, FILTER_VALIDATE_URL)) {
-            return [];
+        foreach ($this->outputUrls($responseData) as $i => $url) {
+            $response = Http::withoutAITracking()->get($url);
+
+            if (! $response->successful()) {
+                continue;
+            }
+
+            $extension = $this->resolveExtensionFromContentType($response->header('Content-Type'));
+            $stored[] = $persister->store($requestId, $i, $response->body(), $extension);
         }
 
-        $response = Http::withoutAITracking()->get($output);
+        return $stored;
+    }
 
-        if (! $response->successful()) {
-            return [];
+    /**
+     * Seconds of video the input asked for, or null when it doesn't say
+     * (the model then used its own default length).
+     *
+     * @param  array<string, mixed>  $input
+     */
+    protected function durationSeconds(array $input): ?float
+    {
+        $duration = $input['duration'] ?? $input['duration_seconds'] ?? null;
+
+        // Some models take the length as a string such as "8" or "8s".
+        if (is_string($duration)) {
+            $duration = rtrim(trim($duration), 's');
         }
 
-        $extension = $this->resolveExtensionFromContentType($response->header('Content-Type'));
+        if (is_numeric($duration) && (float) $duration > 0) {
+            return (float) $duration;
+        }
 
-        return [app(MediaPersister::class)->store($requestId, 0, $response->body(), $extension)];
+        $frames = $input['num_frames'] ?? null;
+        $fps = $input['frames_per_second'] ?? $input['fps'] ?? null;
+
+        if (is_numeric($frames) && is_numeric($fps) && (float) $fps > 0) {
+            return (float) $frames / (float) $fps;
+        }
+
+        return null;
     }
 
     private function resolveExtensionFromContentType(?string $contentType): string

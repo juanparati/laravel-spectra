@@ -4,29 +4,33 @@ declare(strict_types=1);
 
 namespace Spectra\Providers\Replicate\Handlers;
 
-use Spectra\Concerns\ExtractsModelField;
-use Spectra\Concerns\MatchesParametricEndpoints;
+use Spectra\Contracts\ExtractsModelFromRequest;
 use Spectra\Contracts\ExtractsModelFromResponse;
 use Spectra\Contracts\Handler;
 use Spectra\Contracts\HasFinishReason;
+use Spectra\Contracts\HasProviderLatency;
 use Spectra\Contracts\MatchesResponseShape;
+use Spectra\Contracts\ReportsJobFailure;
+use Spectra\Contracts\SkipsResponse;
 use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\Replicate\Concerns\HandlesPredictions;
 
-class TextHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, MatchesResponseShape
+/**
+ * Replicate predictions from language models (Claude, DeepSeek, Llama, ...).
+ *
+ * Official language models are billed per token and report the counts in
+ * `metrics.input_token_count` / `metrics.output_token_count`. The output is
+ * a list of text pieces (or one string) that are joined.
+ */
+class TextHandler implements ExtractsModelFromRequest, ExtractsModelFromResponse, Handler, HasFinishReason, HasProviderLatency, MatchesResponseShape, ReportsJobFailure, SkipsResponse
 {
-    use ExtractsModelField;
-    use MatchesParametricEndpoints;
+    use HandlesPredictions;
 
     public function modelType(): ModelType
     {
         return ModelType::Text;
-    }
-
-    public function endpoints(): array
-    {
-        return ['/v1/models/{owner}/{model}/predictions'];
     }
 
     /**
@@ -52,41 +56,17 @@ class TextHandler implements ExtractsModelFromResponse, Handler, HasFinishReason
             return $output;
         }
 
-        if (is_array($output) && ! empty($output)) {
-            // Text models return array of string tokens
-            if (is_string($output[0] ?? null)) {
-                return implode('', $output);
-            }
+        // Language models stream their answer as a list of text pieces.
+        if (is_array($output) && $output !== [] && is_string($output[0] ?? null)) {
+            return implode('', array_filter($output, 'is_string'));
         }
 
         return null;
     }
 
-    /** @param  array<string, mixed>  $response */
-    public function extractFinishReason(array $response): ?string
-    {
-        return $response['status'] ?? null;
-    }
-
     /** @param  array<string, mixed>  $data */
     public function matchesResponse(array $data): bool
     {
-        if (! isset($data['urls'], $data['status'])) {
-            return false;
-        }
-
-        $output = $data['output'] ?? null;
-
-        // Text models return string or array of string tokens
-        if (is_string($output)) {
-            return true;
-        }
-
-        if (is_array($output) && ! empty($output) && is_string($output[0] ?? null)) {
-            // Check it's not a URL (which would indicate image/video output)
-            return ! filter_var($output[0], FILTER_VALIDATE_URL);
-        }
-
-        return false;
+        return $this->predictionKind($data) === 'text';
     }
 }

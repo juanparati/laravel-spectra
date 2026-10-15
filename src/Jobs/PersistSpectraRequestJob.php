@@ -9,13 +9,11 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Spectra\Contracts\RequestExporter;
-use Spectra\Events\RequestTracked;
-use Spectra\Models\SpectraRequest;
-use Spectra\Support\Budget\BudgetEnforcer;
-use Spectra\Support\RequestTransformer;
-use Spectra\Support\StatsAggregator;
+use Spectra\Support\Tracking\RequestWriter;
 
+/**
+ * Saves a tracked request off the request cycle (queue or after-response).
+ */
 class PersistSpectraRequestJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -29,33 +27,8 @@ class PersistSpectraRequestJob implements ShouldQueue
         public readonly array $tags,
     ) {}
 
-    public function handle(StatsAggregator $statsAggregator, RequestTransformer $transformer, RequestExporter $exporter): void
+    public function handle(RequestWriter $writer): void
     {
-        if ($this->attributes['response_id'] ?? null) {
-            $request = SpectraRequest::updateOrCreate(
-                ['response_id' => $this->attributes['response_id']],
-                $this->attributes
-            );
-        } else {
-            $request = SpectraRequest::create($this->attributes);
-        }
-
-        if (! empty($this->tags)) {
-            $request->attachTags($this->tags);
-        }
-
-        $statsAggregator->recordRequest($request);
-
-        if (config('spectra.budget.enabled', true)) {
-            app(BudgetEnforcer::class)->reportRecordedRequest($request);
-        }
-
-        $data = $transformer->transform($request);
-
-        RequestTracked::dispatch($data);
-
-        if (config('spectra.integrations.opentelemetry.enabled')) {
-            $exporter->export($data);
-        }
+        $writer->write($this->attributes, $this->tags);
     }
 }

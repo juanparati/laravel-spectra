@@ -3,7 +3,7 @@
 ## Requirements
 
 - PHP 8.2 or higher (PHP 8.3+ required for Laravel 13)
-- Laravel 11.x, 12.x, or 13.x
+- Laravel 12.x or 13.x
 - MySQL 8.0+ or PostgreSQL 13+
 
 ## Install the Package
@@ -20,6 +20,10 @@ If you use **Text-to-Speech (TTS)** models, install `james-heinrich/getid3` as w
 ```shell
 composer require james-heinrich/getid3
 ```
+:::
+
+::: tip Upgrading from 1.x?
+Read the [Upgrade Guide](/upgrade). Most apps only need to run one new migration.
 :::
 
 After installing Spectra, publish its assets and run the database migrations using the `spectra:install` Artisan command:

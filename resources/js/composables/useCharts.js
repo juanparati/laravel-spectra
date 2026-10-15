@@ -1,251 +1,276 @@
 import Chart from 'chart.js/auto';
 
-// Color palette
-const colors = {
-    primary: {
-        solid: 'rgb(99, 102, 241)',
-        light: 'rgba(99, 102, 241, 0.1)',
-        gradient: ['rgba(99, 102, 241, 0.3)', 'rgba(99, 102, 241, 0.0)'],
-    },
-    success: 'rgb(16, 185, 129)',
-    warning: 'rgb(245, 158, 11)',
-    danger: 'rgb(239, 68, 68)',
-    purple: 'rgb(139, 92, 246)',
-    blue: 'rgb(59, 130, 246)',
-    cyan: 'rgb(6, 182, 212)',
-    pink: 'rgb(236, 72, 153)',
-};
+/*
+ * Chart styling for the dashboard.
+ *
+ * - Series colors come from a validated, color-blind-safe categorical palette
+ *   with separate light and dark steps (see useHelpers::seriesColor).
+ * - Grid and axes stay recessive; marks are thin (2px lines, rounded bars).
+ * - Every chart re-themes itself when the dark-mode class changes, so a theme
+ *   toggle never leaves light colors on a dark surface.
+ */
 
-// Fallback palette for charts without explicit colors (e.g. model type breakdown)
-const chartPalette = [
-    colors.primary.solid,
-    colors.success,
-    colors.warning,
-    colors.danger,
-    colors.purple,
-    colors.blue,
-    colors.cyan,
-    colors.pink,
-];
-
-// Check if dark mode is active
 const isDarkMode = () => document.documentElement.classList.contains('dark');
 
-// Get theme-aware colors
-const getGridColor = () => isDarkMode() ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)';
-const getTextColor = () => isDarkMode() ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.5)';
-const getBorderColor = () => isDarkMode() ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+const theme = () => (isDarkMode()
+    ? {
+        accent: '#8b7dff',
+        accentFill: ['rgba(139, 125, 255, 0.28)', 'rgba(139, 125, 255, 0)'],
+        grid: 'rgba(255, 255, 255, 0.06)',
+        text: '#a1a1aa',
+        surface: '#121215',
+        tooltipBg: 'rgba(24, 24, 27, 0.96)',
+        tooltipTitle: '#fafafa',
+        tooltipBody: '#d4d4d8',
+        tooltipBorder: 'rgba(255, 255, 255, 0.08)',
+        fallback: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
+    }
+    : {
+        accent: '#5b45e8',
+        accentFill: ['rgba(91, 69, 232, 0.16)', 'rgba(91, 69, 232, 0)'],
+        grid: 'rgba(24, 24, 27, 0.06)',
+        text: '#71717a',
+        surface: '#ffffff',
+        tooltipBg: 'rgba(255, 255, 255, 0.98)',
+        tooltipTitle: '#18181b',
+        tooltipBody: '#52525b',
+        tooltipBorder: 'rgba(24, 24, 27, 0.08)',
+        fallback: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'],
+    });
 
-// Base chart options
-const getBaseOptions = () => ({
-    responsive: true,
-    maintainAspectRatio: true,
-    animation: {
-        duration: 750,
-        easing: 'easeOutQuart',
-    },
-    plugins: {
-        legend: {
-            display: false,
-        },
-        tooltip: {
-            backgroundColor: isDarkMode() ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-            titleColor: isDarkMode() ? '#fff' : '#111827',
-            bodyColor: isDarkMode() ? 'rgba(255, 255, 255, 0.8)' : '#4b5563',
-            borderColor: getBorderColor(),
-            borderWidth: 1,
-            cornerRadius: 8,
-            padding: 12,
-            boxPadding: 6,
-            usePointStyle: true,
-            titleFont: {
-                size: 13,
-                weight: '600',
-            },
-            bodyFont: {
-                size: 12,
-            },
-        },
-    },
-});
+Chart.defaults.font.family = "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
+Chart.defaults.font.size = 11;
 
-// Create gradient for area charts
-const createGradient = (ctx, chartArea) => {
+const tooltip = () => {
+    const t = theme();
+
+    return {
+        backgroundColor: t.tooltipBg,
+        titleColor: t.tooltipTitle,
+        bodyColor: t.tooltipBody,
+        borderColor: t.tooltipBorder,
+        borderWidth: 1,
+        cornerRadius: 10,
+        padding: 10,
+        boxPadding: 4,
+        boxWidth: 8,
+        boxHeight: 8,
+        usePointStyle: true,
+        titleFont: { size: 12, weight: '600' },
+        bodyFont: { size: 12 },
+        displayColors: true,
+    };
+};
+
+const axes = (yTicks = {}) => {
+    const t = theme();
+
+    return {
+        x: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: { color: t.text, maxRotation: 0, autoSkipPadding: 16 },
+        },
+        y: {
+            beginAtZero: true,
+            grid: { color: t.grid, drawTicks: false },
+            border: { display: false },
+            ticks: { color: t.text, padding: 8, maxTicksLimit: 5, ...yTicks },
+        },
+    };
+};
+
+// Charts re-theme on dark-mode toggles.
+const liveCharts = new Set();
+
+if (typeof window !== 'undefined' && typeof MutationObserver !== 'undefined') {
+    new MutationObserver(() => {
+        for (const entry of liveCharts) {
+            if (!entry.chart.canvas?.isConnected) {
+                liveCharts.delete(entry);
+                continue;
+            }
+            entry.retheme();
+            entry.chart.update('none');
+        }
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+}
+
+const track = (chart, retheme) => {
+    const entry = { chart, retheme };
+    liveCharts.add(entry);
+
+    const destroy = chart.destroy.bind(chart);
+    chart.destroy = () => {
+        liveCharts.delete(entry);
+        destroy();
+    };
+
+    return chart;
+};
+
+const resolveColors = (colors, count) => {
+    const value = typeof colors === 'function' ? colors() : colors;
+
+    return value || theme().fallback.slice(0, count);
+};
+
+const areaFill = (context) => {
+    const { ctx, chartArea } = context.chart;
+    const [top, bottom] = theme().accentFill;
+
+    if (!chartArea) return top;
+
     const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-    gradient.addColorStop(0, colors.primary.gradient[0]);
-    gradient.addColorStop(1, colors.primary.gradient[1]);
+    gradient.addColorStop(0, top);
+    gradient.addColorStop(1, bottom);
+
     return gradient;
 };
 
 export function useCharts() {
     /**
-     * Create a line/area chart for time series data
+     * Line/area chart for one time series.
      */
     const createLineChart = (canvas, data, options = {}) => {
-        const ctx = canvas.getContext('2d');
-
-        return new Chart(canvas, {
+        const chart = new Chart(canvas, {
             type: 'line',
             data: {
                 labels: data.labels,
                 datasets: [{
                     label: options.label || 'Value',
                     data: data.values,
-                    borderColor: colors.primary.solid,
-                    backgroundColor: (context) => {
-                        const chart = context.chart;
-                        const { ctx, chartArea } = chart;
-                        if (!chartArea) return colors.primary.light;
-                        return createGradient(ctx, chartArea);
-                    },
-                    borderWidth: 2.5,
-                    tension: 0.4,
+                    borderColor: theme().accent,
+                    backgroundColor: areaFill,
+                    borderWidth: 2,
+                    tension: 0.35,
                     fill: true,
                     pointRadius: 0,
-                    pointHoverRadius: 6,
-                    pointHoverBackgroundColor: colors.primary.solid,
-                    pointHoverBorderColor: '#fff',
+                    pointHitRadius: 12,
+                    pointHoverRadius: 5,
+                    pointHoverBackgroundColor: theme().accent,
+                    pointHoverBorderColor: theme().surface,
                     pointHoverBorderWidth: 2,
                 }],
             },
             options: {
-                ...getBaseOptions(),
-                interaction: {
-                    intersect: false,
-                    mode: 'index',
-                },
-                scales: {
-                    x: {
-                        grid: {
-                            display: false,
-                        },
-                        border: {
-                            display: false,
-                        },
-                        ticks: {
-                            color: getTextColor(),
-                            font: { size: 11 },
-                            maxRotation: 0,
-                        },
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: {
-                            color: getGridColor(),
-                            drawBorder: false,
-                        },
-                        border: {
-                            display: false,
-                        },
-                        ticks: {
-                            color: getTextColor(),
-                            font: { size: 11 },
-                            padding: 8,
-                            ...options.yTicks,
-                        },
-                    },
-                },
+                responsive: true,
+                maintainAspectRatio: true,
+                animation: { duration: 500, easing: 'easeOutQuart' },
+                interaction: { intersect: false, mode: 'index' },
+                plugins: { legend: { display: false }, tooltip: tooltip() },
+                scales: axes(options.yTicks),
                 ...options.chartOptions,
             },
+        });
+
+        return track(chart, () => {
+            const t = theme();
+            const dataset = chart.data.datasets[0];
+            dataset.borderColor = t.accent;
+            dataset.pointHoverBackgroundColor = t.accent;
+            dataset.pointHoverBorderColor = t.surface;
+            chart.options.plugins.tooltip = { ...chart.options.plugins.tooltip, ...tooltip() };
+            Object.assign(chart.options.scales.x.ticks, { color: t.text });
+            Object.assign(chart.options.scales.y.ticks, { color: t.text });
+            chart.options.scales.y.grid.color = t.grid;
         });
     };
 
     /**
-     * Create a bar chart
+     * Bar chart for one series.
      */
     const createBarChart = (canvas, data, options = {}) => {
-        return new Chart(canvas, {
+        const chart = new Chart(canvas, {
             type: 'bar',
             data: {
                 labels: data.labels,
                 datasets: [{
                     label: options.label || 'Value',
                     data: data.values,
-                    backgroundColor: colors.primary.solid,
-                    borderRadius: 6,
-                    borderSkipped: false,
+                    backgroundColor: theme().accent,
+                    hoverBackgroundColor: theme().accent,
+                    borderRadius: 4,
+                    borderSkipped: 'start',
                     barThickness: options.barThickness || 'flex',
-                    maxBarThickness: 40,
+                    maxBarThickness: 28,
                 }],
             },
             options: {
-                ...getBaseOptions(),
-                scales: {
-                    x: {
-                        grid: {
-                            display: false,
-                        },
-                        border: {
-                            display: false,
-                        },
-                        ticks: {
-                            color: getTextColor(),
-                            font: { size: 11 },
-                            maxRotation: 0,
-                        },
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: {
-                            color: getGridColor(),
-                            drawBorder: false,
-                        },
-                        border: {
-                            display: false,
-                        },
-                        ticks: {
-                            color: getTextColor(),
-                            font: { size: 11 },
-                            padding: 8,
-                            ...options.yTicks,
-                        },
-                    },
-                },
+                responsive: true,
+                maintainAspectRatio: true,
+                animation: { duration: 500, easing: 'easeOutQuart' },
+                interaction: { intersect: false, mode: 'index' },
+                plugins: { legend: { display: false }, tooltip: tooltip() },
+                scales: axes(options.yTicks),
                 ...options.chartOptions,
             },
+        });
+
+        return track(chart, () => {
+            const t = theme();
+            chart.data.datasets[0].backgroundColor = t.accent;
+            chart.data.datasets[0].hoverBackgroundColor = t.accent;
+            chart.options.plugins.tooltip = { ...chart.options.plugins.tooltip, ...tooltip() };
+            Object.assign(chart.options.scales.x.ticks, { color: t.text });
+            Object.assign(chart.options.scales.y.ticks, { color: t.text });
+            chart.options.scales.y.grid.color = t.grid;
         });
     };
 
     /**
-     * Create a doughnut/pie chart
+     * Doughnut for part-to-whole with a few categories. A 2px surface-colored
+     * border keeps segments visually separate; the legend lists every slice.
+     *
+     * `data.colors` may be an array or a function returning one (re-evaluated
+     * on theme change).
      */
     const createDoughnutChart = (canvas, data, options = {}) => {
-        const bgColors = data.colors || chartPalette.slice(0, data.values.length);
-
-        return new Chart(canvas, {
+        const chart = new Chart(canvas, {
             type: options.type || 'doughnut',
             data: {
                 labels: data.labels,
                 datasets: [{
                     data: data.values,
-                    backgroundColor: bgColors,
-                    borderWidth: 0,
+                    backgroundColor: resolveColors(data.colors, data.values.length),
+                    borderColor: theme().surface,
+                    borderWidth: 2,
                     hoverOffset: 4,
+                    borderRadius: 3,
                 }],
             },
             options: {
-                ...getBaseOptions(),
-                cutout: options.type === 'pie' ? 0 : '70%',
+                responsive: true,
+                maintainAspectRatio: true,
+                animation: { duration: 500, easing: 'easeOutQuart' },
+                cutout: options.type === 'pie' ? 0 : '72%',
                 plugins: {
-                    ...getBaseOptions().plugins,
                     legend: {
-                        display: true,
+                        display: options.legend !== false,
                         position: 'bottom',
                         labels: {
-                            color: getTextColor(),
-                            padding: 16,
+                            color: theme().text,
+                            padding: 14,
                             usePointStyle: true,
                             pointStyle: 'circle',
+                            boxWidth: 7,
+                            boxHeight: 7,
                             font: { size: 12 },
                         },
                     },
-                    tooltip: {
-                        ...getBaseOptions().plugins.tooltip,
-                        callbacks: options.tooltipCallbacks || {},
-                    },
+                    tooltip: { ...tooltip(), callbacks: options.tooltipCallbacks || {} },
                 },
                 ...options.chartOptions,
             },
+        });
+
+        return track(chart, () => {
+            const t = theme();
+            const dataset = chart.data.datasets[0];
+            dataset.backgroundColor = resolveColors(data.colors, dataset.data.length);
+            dataset.borderColor = t.surface;
+            chart.options.plugins.legend.labels.color = t.text;
+            chart.options.plugins.tooltip = { ...chart.options.plugins.tooltip, ...tooltip() };
         });
     };
 
@@ -253,7 +278,6 @@ export function useCharts() {
         createLineChart,
         createBarChart,
         createDoughnutChart,
-        colors,
-        chartPalette,
+        theme,
     };
 }

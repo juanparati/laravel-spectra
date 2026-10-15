@@ -146,7 +146,7 @@ Spectra assigns a `trace_id` to each tracked request. This identifier appears in
 
 ### Automatic Trace IDs
 
-Every tracked request receives a UUID trace ID automatically. Requests made within the same `Spectra::track()` callback or the same HTTP request share the same trace ID by default, making it easy to correlate related operations.
+Every tracked request receives a UUID trace ID automatically. To give several requests the same trace ID (for example, all AI calls of one HTTP request or job), set it once with `Spectra::withTraceId($traceId)`. Like the other global settings, it is reset between queued jobs and Octane requests.
 
 ### Custom Trace IDs
 
@@ -170,14 +170,77 @@ $result = Spectra::track('openai', 'gpt-4o', function ($ctx) use ($myTraceId) {
 
 This enables end-to-end tracing: a user clicking "Generate Summary" triggers an API route, which calls an AI model, which writes to the database, which dispatches a queue job — all linked under a single trace ID visible across both Spectra and your observability platform.
 
+<a name="span-attributes"></a>
+## Span Name and Attributes
+
+The default span builder follows the current OpenTelemetry GenAI semantic conventions for client inference spans. You can read them in the [semantic conventions repository](https://github.com/open-telemetry/semantic-conventions-genai).
+
+The span name is `{operation} {model}`, for example `chat gpt-4o`. The operation (`gen_ai.operation.name`) is one of `chat`, `embeddings`, `generate_content`, `text_completion`, `rerank`, or `transcription`. The model is the provider's model id (the `snapshot` column). Spectra stores it for every request it can name, even when the response echoes the model you asked for.
+
+Every span has these attributes:
+
+| Attribute | Value |
+| --- | --- |
+| `gen_ai.operation.name` | The operation, as above |
+| `gen_ai.provider.name` | The provider (`openai`, `anthropic`, ...; `gcp.gemini` for Google, `x_ai` for xAI) |
+| `gen_ai.request.model` | The model, as in the span name |
+| `gen_ai.usage.input_tokens` | Prompt tokens (the full prompt, including cache reads and writes) |
+| `gen_ai.usage.output_tokens` | Completion tokens (the full output, including reasoning) |
+| `http.response.status_code` | The HTTP status code |
+| `spectra.trace_id`, `spectra.request_id` | Spectra's trace id and request id |
+| `spectra.model` | The model name Spectra stored |
+| `spectra.cost_cents` | The total cost, in cents |
+| `spectra.latency_ms` | The latency, in milliseconds |
+
+These attributes are added when they have a value:
+
+| Attribute | Value |
+| --- | --- |
+| `gen_ai.response.model` | The model id the provider returned |
+| `gen_ai.response.id` | The provider's response id |
+| `gen_ai.response.finish_reasons` | The finish reason, as an array |
+| `gen_ai.usage.cache_read.input_tokens` | Prompt tokens read from the cache |
+| `gen_ai.usage.cache_write.input_tokens` | Prompt tokens written to the cache |
+| `gen_ai.usage.reasoning.output_tokens` | Reasoning tokens |
+| `gen_ai.request.stream` | `true` for streamed requests |
+| `gen_ai.conversation.id` | The conversation id |
+| `error.type` | The error class (or the status code) of a failed request |
+| `spectra.endpoint` | The API endpoint path |
+| `spectra.model_type`, `spectra.pricing_tier`, `spectra.currency` | Model type, pricing tier, and the currency of the cost |
+| `spectra.trackable.type`, `spectra.trackable.id` | The trackable (user, team, ...) |
+| `spectra.reasoning_effort`, `spectra.has_tool_calls` | Reasoning effort and tool use |
+| `spectra.time_to_first_token_ms`, `spectra.tokens_per_second`, `spectra.duration_seconds` | Streaming and media metrics |
+
+A failed request has the error status, with the provider's error message.
+
+<a name="attribute-changes"></a>
+### Changes from 1.x
+
+Spectra 2.0 renamed several attributes to follow the current conventions:
+
+| 1.x | 2.0 |
+| --- | --- |
+| span name `ai.{provider}.{model}` | `{operation} {model}`, e.g. `chat gpt-4o` |
+| `gen_ai.system` | `gen_ai.provider.name` (`gcp.gemini` for Google, `x_ai` for xAI) |
+| `gen_ai.operation.name` = endpoint path | `gen_ai.operation.name` = `chat`, `embeddings`, `generate_content`, ...; the path moved to `spectra.endpoint` |
+| `gen_ai.usage.prompt_tokens` | `gen_ai.usage.input_tokens` |
+| `gen_ai.usage.completion_tokens` | `gen_ai.usage.output_tokens` |
+| `gen_ai.usage.total_tokens` | removed (input + output) |
+| `gen_ai.usage.reasoning_tokens` | `gen_ai.usage.reasoning.output_tokens` |
+| `gen_ai.response.finish_reason` | `gen_ai.response.finish_reasons` (array) |
+| `spectra.is_streaming` | `gen_ai.request.stream` |
+| — | `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_write.input_tokens`, `gen_ai.conversation.id`, `error.type`, `spectra.currency`, `spectra.model` |
+
+If your dashboards or alerts use the old names, update them. Or extend `DefaultSpanBuilder` and override `attributes()` or `spanName()` to keep the old names (see below).
+
 <a name="customizing-spans"></a>
 ## Customizing Spans
 
-The default span builder follows the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), exporting attributes like `gen_ai.system`, `gen_ai.request.model`, token counts, cost, and latency. You can customize how spans are built by providing your own `SpanBuilder` implementation.
+You can customize how spans are built by providing your own `SpanBuilder` implementation.
 
 ### Extending the Default Builder
 
-The easiest approach is to extend `DefaultSpanBuilder` and override the specific methods you want to change. All methods are `protected` and designed for selective overriding:
+The easiest approach is to extend `DefaultSpanBuilder` and override the specific methods you want to change. Apart from `build()`, its methods are `protected` and designed for selective overriding:
 
 ```php
 use Spectra\Integrations\OpenTelemetry\DefaultSpanBuilder;
@@ -246,31 +309,45 @@ class MinimalSpanBuilder implements SpanBuilder
 
 ### Available Data
 
-The `$data` array passed to `SpanBuilder::build()` contains these fields:
+The `$data` array passed to `SpanBuilder::build()` holds the stored request columns (without the raw `request` and `response` payloads). The main fields are:
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `id` | `string` | Unique request ID |
 | `trace_id` | `?string` | Trace ID for correlation |
 | `response_id` | `?string` | Provider's response ID |
+| `conversation_id` | `?string` | Conversation ID, if set |
+| `conversation_turn` | `?int` | Turn number in the conversation |
 | `provider` | `string` | Provider name (e.g. `openai`) |
-| `model` | `string` | Model name (e.g. `gpt-4o`) |
-| `snapshot` | `?string` | Model version returned by the API |
-| `model_type` | `?string` | Classification: `text`, `image`, `tts`, `stt`, `video` |
+| `model` | `string` | The catalog display name of the requested model (e.g. `GPT-4o`), or its id when the catalog doesn't know it |
+| `snapshot` | `?string` | The provider's model id: the one the response returned, or the requested id when the response didn't name one |
+| `model_type` | `?string` | Classification: `text`, `embedding`, `image`, `tts`, `stt`, `video` |
 | `endpoint` | `?string` | API endpoint path |
 | `pricing_tier` | `?string` | Pricing tier used |
-| `prompt_tokens` | `int` | Input tokens |
-| `completion_tokens` | `int` | Output tokens |
+| `prompt_tokens` | `int` | Input tokens (the full prompt) |
+| `completion_tokens` | `int` | Output tokens (the full output) |
+| `cached_tokens` | `int` | Prompt tokens read from the cache |
+| `cache_write_tokens` | `int` | Prompt tokens written to the cache |
 | `reasoning_tokens` | `int` | Reasoning/thinking tokens |
 | `total_tokens` | `int` | Sum of prompt + completion tokens |
+| `prompt_cost` | `float` | Prompt cost in cents |
+| `completion_cost` | `float` | Completion cost in cents |
 | `total_cost_in_cents` | `float` | Total cost in cents |
+| `currency` | `?string` | The currency of the costs (e.g. `USD`) |
 | `latency_ms` | `?int` | Request latency in milliseconds |
+| `time_to_first_token_ms` | `?int` | Time to the first token (streaming) |
 | `status_code` | `?int` | HTTP status code |
 | `is_failed` | `bool` | Whether the request failed |
+| `error_type` | `?string` | Error class of a failed request |
+| `error_message` | `?string` | The provider's error message |
 | `finish_reason` | `?string` | Model's finish reason |
 | `is_reasoning` | `bool` | Whether reasoning was used |
 | `is_streaming` | `bool` | Whether the request was streamed |
 | `has_tool_calls` | `bool` | Whether tools were called |
+| `tool_call_counts` | `?array` | Tool calls by type |
+| `trackable_type` | `?string` | Trackable morph type |
+| `trackable_id` | `?string` | Trackable id |
+| `request_source` | `?string` | `web`, `api`, or `console` |
 | `started_at` | `Carbon` | Request start time |
 | `completed_at` | `Carbon` | Request completion time |
 | `metadata` | `?array` | Custom metadata |

@@ -32,12 +32,12 @@ Controls how and what Spectra persists to the database. These settings let you b
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `connection` | `string\|null` | `null` | Database connection name. `null` uses the application default. Set to a separate connection for high-volume applications to isolate observability writes. |
-| `store_requests` | `bool` | `true` | Persist request payloads (the JSON body sent to the provider). Disable to reduce storage for high-volume applications. |
+| `store_requests` | `bool` | `true` | Save request records to the database. When `false`, nothing is saved: requests are still tracked in memory, and still sent to the `RequestTracked` event and to OpenTelemetry. |
 | `store_responses` | `bool` | `true` | Persist response payloads (the JSON returned by the provider). |
 | `store_prompts` | `bool` | `true` | Store user prompt text and chat messages. Disable for privacy compliance (GDPR, CCPA). |
 | `store_system_prompts` | `bool` | `true` | Store system prompts separately. These often contain proprietary business logic. |
 | `store_tools` | `bool` | `true` | Store function and tool definitions sent to the AI provider. These can be large for complex tool schemas. |
-| `store_request_data` | `bool\|null` | `null` | Store the raw API request parameters (the full JSON body, including sampling settings). When `null`, follows `store_prompts`. |
+| `store_request_data` | `bool\|null` | `null` | Store the raw request body sent to the provider (the full JSON body, including sampling settings) in the `request` column. When `null`, follows `store_prompts`. When it resolves to `false`, the raw body is not saved. |
 | `store_embeddings` | `bool` | `false` | Store embedding vector values in the response column. Embedding requests are always tracked (tokens, costs, latency), but the float-vector arrays can be very large. When disabled, vectors are replaced with `[stripped]`. |
 
 <a name="media-persistence"></a>
@@ -70,7 +70,7 @@ Some AI endpoints return media with expiring URLs — for example, DALL-E images
 >
 > To preserve the actual media files, enable media persistence above. Spectra will decode and store the files on disk, and the dashboard will serve them from the `media_storage_path` column.
 
-Media files are stored as flat file paths in the `media_storage_path` JSON column (e.g. `["spectra-media/abc123/0.png", "spectra-media/abc123/1.png"]`). The dashboard serves images and audio directly from these paths via internal API routes.
+Media files are stored as flat file paths in the `media_storage_path` JSON column (e.g. `["spectra/abc123/0.png", "spectra/abc123/1.png"]`). The dashboard serves images and audio directly from these paths via internal API routes. When [`spectra:prune`](/commands#spectra-prune) deletes a request, it deletes the request's stored media files too.
 
 <a name="api-keys"></a>
 ## API Keys
@@ -138,10 +138,12 @@ Configure what contextual information Spectra captures automatically with each t
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `auto_track_user` | `bool` | `true` | Automatically associate requests with the authenticated user via the polymorphic `trackable` relationship. |
-| `capture_ip` | `bool` | `true` | Store the client's IP address. Disable for GDPR or CCPA compliance. |
-| `capture_user_agent` | `bool` | `true` | Store the client's user agent string. |
-| `capture_request_id` | `bool` | `true` | Capture or generate a request ID for correlation. Uses the `X-Request-ID` header if present. |
+| `auto_track_user` | `bool` | `true` | Automatically associate requests with the authenticated user via the polymorphic `trackable` relationship. A trackable you set yourself always wins over the signed-in user. |
+| `capture_ip` | `bool` | `true` | Store the client's IP address in the `ip_address` column. Disable for GDPR or CCPA compliance. |
+| `capture_user_agent` | `bool` | `true` | Store the client's user agent string in the `user_agent` column. |
+| `capture_request_id` | `bool` | `true` | Store a request ID for correlation with your logs in the `laravel_request_id` column. Uses the `X-Request-ID` header if present, otherwise generates one. |
+
+These values come from the current HTTP request. In Artisan commands and queue workers there is no real client, so they don't mean much there. Spectra also stores where the call came from in the `request_source` column: `web`, `api` (the request expects JSON), or `console` (Artisan commands and queue workers). Turn the `capture_*` options off if you don't want these values stored.
 
 <a name="dashboard"></a>
 ## Dashboard
@@ -177,6 +179,9 @@ Configure cost calculation and pricing tiers.
 'costs' => [
     'enabled'         => true,
     'currency'        => 'USD',
+    'exchange_rates'  => [
+        // 'EUR' => 1.17,
+    ],
     'currency_symbol' => '$',
 
     'provider_settings' => [
@@ -208,9 +213,10 @@ Configure cost calculation and pricing tiers.
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `enabled` | `bool` | `true` | Calculate and store costs for each tracked request. |
-| `currency` | `string` | `USD` | Currency code for display purposes. Does not perform any conversion. |
-| `currency_symbol` | `string` | `$` | Symbol shown before cost values in the dashboard. |
-| `provider_settings.*.default_tier` | `string` | `standard` | Default pricing tier for each provider. Used when no explicit tier is specified. |
+| `currency` | `string` | `USD` | The currency costs are stored in (cents of this currency). Catalog prices in another currency (Scaleway is in EUR), and costs that providers report in US dollars, are converted with `exchange_rates`. |
+| `exchange_rates` | `array` | `[]` | How many units of `currency` one unit of another currency is worth. For example, `['EUR' => 1.17]` when you report in USD, or `['USD' => 0.86]` when you report in EUR. A missing rate counts as 1:1, and Spectra logs a warning once per process. Spectra does not fetch rates, so update them from time to time. |
+| `currency_symbol` | `string` | `$` | Symbol shown before cost values in the dashboard. Display only. |
+| `provider_settings.*.default_tier` | `string` | `standard` | The tier used when you did not set one (with `Spectra::withPricingTier()` or the `pricing_tier` option), and neither the request nor the response says which tier was used. Tiers: `standard`, `batch`, `flex`, `priority`, `fast`, `ultrafast`, `hd`. Any provider slug may be listed. See [Which Tier Is Used](/costs#tier-order). |
 | `pricing` | `array` | See above | Map provider slugs to their `ProviderPricing` class. See [Pricing](/pricing) for customization. |
 
 <a name="budget"></a>
@@ -255,9 +261,9 @@ Configure automatic HTTP request interception.
 
 | Watcher | Intercepts | Mechanism |
 | --- | --- | --- |
-| `HttpWatcher` | Laravel `Http` facade requests | Global event listener on `ResponseReceived` |
-| `OpenAiWatcher` | `openai-php/laravel` SDK calls | Decorates the OpenAI client with a tracking handler stack |
-| `GuzzleWatcher` | Direct Guzzle HTTP client usage | Provides a Guzzle middleware for tracked handler stacks |
+| `HttpWatcher` | Laravel `Http` facade requests (and Prism, Laravel AI) | Adds Spectra's Guzzle middleware as global HTTP client middleware |
+| `OpenAiWatcher` | `openai-php/laravel` SDK calls | Replaces the OpenAI client with one that uses a tracked handler stack |
+| `GuzzleWatcher` | Direct Guzzle HTTP client usage | Registers tracked handler stacks in the container (`spectra.guzzle.handler`, `spectra.guzzle.handler.{provider}`) |
 
 <a name="providers"></a>
 ## Providers
@@ -324,6 +330,7 @@ SPECTRA_STORE_RESPONSES=true
 SPECTRA_STORE_PROMPTS=true
 SPECTRA_STORE_SYSTEM_PROMPTS=true
 SPECTRA_STORE_TOOLS=true
+SPECTRA_STORE_REQUEST_DATA=
 SPECTRA_STORE_EMBEDDINGS=false
 
 # Media

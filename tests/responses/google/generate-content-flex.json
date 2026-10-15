@@ -1,0 +1,30 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "Trend: weekly sign-ups grew 4% on average over the quarter."
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 10000,
+    "candidatesTokenCount": 2000,
+    "totalTokenCount": 12000,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 10000
+      }
+    ],
+    "serviceTier": "flex"
+  },
+  "modelVersion": "gemini-3-flash-preview",
+  "responseId": "Zn3vaPDcBZqR7M8Pr7GxsQc"
+}

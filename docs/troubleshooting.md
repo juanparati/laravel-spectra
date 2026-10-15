@@ -27,7 +27,11 @@ This page covers common issues you may encounter when using Spectra and how to r
    php artisan migrate
    ```
 
-6. **Using a supported HTTP client** — Spectra automatically tracks requests made via Laravel's `Http` facade (HttpWatcher), the `openai-php/laravel` SDK (OpenAiWatcher), and Guzzle with Spectra middleware (GuzzleMiddleware). Direct `curl` calls or other HTTP clients are not intercepted automatically — use the [Guzzle middleware](/usage#guzzle-middleware) or [manual tracking](/usage#manual-tracking) for those.
+6. **Using a supported HTTP client** — Spectra automatically tracks requests made via Laravel's `Http` facade (HttpWatcher, which also covers Prism and Laravel AI), the `openai-php/laravel` SDK (OpenAiWatcher), and Guzzle with Spectra middleware (GuzzleMiddleware). Streamed responses through these clients are tracked too. Direct `curl` calls or other HTTP clients are not tracked automatically — use the [Guzzle middleware](/usage#guzzle-middleware), [`Spectra::stream()`](/usage#spectra-stream), or [manual tracking](/usage#manual-tracking) for those.
+
+7. **A stream was not read to the end** — A streamed request is recorded when your code reads the body to the end, closes it, or drops the response. If your code keeps the response object alive without reading it, nothing is recorded yet.
+
+8. **Saving failed** — Spectra never throws saving errors into your app. They go to your exception handler, so check your error log (for example, for a missing column after an upgrade — see [Migrations](/migrations#v2-migration)).
 
 ## Requests Tracked But Cost Is Zero
 
@@ -37,7 +41,7 @@ This page covers common issues you may encounter when using Spectra and how to r
 
 1. **Pricing class exists** — The pricing catalog must contain entries for the models you are using. Pricing is defined through `ProviderPricing` classes registered in `config/spectra.php` under `costs.pricing`. See [Pricing](/pricing) for details.
 
-2. **Model name matches** — The internal name in the pricing class must match exactly what the provider returns in the response. Check the model name stored in your request records against the pricing class definitions.
+2. **Model name matches** — The model id must match a catalog entry: by its exact id, an alias, or the id without a snapshot date or routing suffix. See [How Spectra Finds a Model](/pricing#model-lookup). Compare the `snapshot` and `model` values in your request records with the pricing class definitions.
 
 3. **Pricing tier exists** — If you are using a non-standard tier (such as `batch` or `flex`), a pricing tier entry must exist for that tier in the provider's pricing class.
 
@@ -49,6 +53,8 @@ This page covers common issues you may encounter when using Spectra and how to r
        'enabled' => true,
    ],
    ```
+
+6. **Streamed OpenAI Chat Completions** — OpenAI only sends usage in a Chat Completions stream when the request has `'stream_options' => ['include_usage' => true]`. Without it, the request is recorded with zero tokens and zero cost. See [Streaming](/usage#streaming).
 
 ## Dashboard Shows Empty Data
 
@@ -166,6 +172,8 @@ This is expected behavior in two scenarios:
 
 **Symptoms:** Dashboard charts or cost totals don't match the raw request data.
 
+This can also happen after upgrading from 1.x: Spectra 1.x counted each poll of an async job (for example, video generation) in the daily stats.
+
 **Solution:** Rebuild the daily statistics aggregation from the raw request records:
 
 ```shell
@@ -174,6 +182,8 @@ php artisan spectra:rebuild-stats
 # Or rebuild a specific date range
 php artisan spectra:rebuild-stats --from=2026-01-01 --to=2026-01-31
 ```
+
+The stats are rebuilt only from requests that still exist. If you pruned old requests but kept their daily stats, rebuild only the days you still have requests for (see [`spectra:rebuild-stats`](/commands#spectra-rebuild-stats)).
 
 ## Media Files Not Being Saved
 
@@ -226,9 +236,10 @@ php artisan spectra:rebuild-stats --from=2026-01-01 --to=2026-01-31
 
 - **Disable payload storage** if you don't need request and response bodies:
   ```bash
-  SPECTRA_STORE_REQUESTS=false
+  SPECTRA_STORE_REQUEST_DATA=false
   SPECTRA_STORE_RESPONSES=false
   ```
+  Don't set `SPECTRA_STORE_REQUESTS=false` for this. It stops Spectra from saving request records at all.
 
 - **Schedule pruning** to prevent unbounded table growth:
   ```shell
@@ -239,10 +250,59 @@ php artisan spectra:rebuild-stats --from=2026-01-01 --to=2026-01-31
 
 **Symptoms:** The same AI request appears multiple times in the dashboard.
 
-**Causes:**
+Spectra tracks each request once. Every route into a provider (the HTTP client, the OpenAI SDK, the Guzzle stacks, and `withAITracking()`) uses the same middleware, and a request sent with `withAITracking()` is skipped by the global middleware. When two records have the same provider response id, Spectra updates the first one instead of adding a new one. This is also how polled async jobs (for example, video generation) stay one request. If you wrap a stream that Spectra already tracks in `Spectra::stream()`, it is recorded once.
 
-- **Multiple watchers matching** — If both HttpWatcher and GuzzleWatcher intercept the same request, it may be tracked twice. The `response_id` unique constraint prevents true duplicates, but different watchers may generate different response identifiers.
+**Causes:**
 
 - **Retry middleware** — If your HTTP client retries failed requests, each attempt is tracked as a separate request. This is intentional, as each retry attempt consumes tokens and incurs costs.
 
-**Solution:** Use only one tracking mechanism per request path. If you use the OpenAI SDK with GuzzleWatcher, consider disabling HttpWatcher for those hosts, or rely exclusively on one watcher type.
+- **No response id** — Records are only merged when the provider sends a response id. If you track the same call twice yourself (for example, with `Spectra::track()` and a custom Guzzle middleware), and the response has no id, you get two records.
+
+**Solution:** Use only one tracking mechanism per request path.
+
+<a name="costs-changed-after-upgrade"></a>
+## Costs Look Higher or Lower After Upgrading
+
+**Symptoms:** After upgrading to Spectra 2.0, new requests cost more (or less) than the same requests did before.
+
+This is expected. Spectra 2.0 prices requests more accurately:
+
+- Prompt tokens now include cache reads and writes for every provider (Anthropic used to report only the uncached part), and cache writes are billed at their own rate.
+- Reasoning tokens are now billed for every provider (Gemini thinking tokens and xAI reasoning tokens used to be left out).
+- The tier the provider reports wins over the tier the request asked for.
+- A cost the provider reports (OpenRouter, xAI) is used as is.
+- The model the provider actually served is priced first.
+
+Older rows keep their old values. Nothing is rewritten. See the [Upgrade Guide](/upgrade#what-changes-in-the-numbers) for details. To fix daily stats that 1.x counted more than once for polled jobs, run `php artisan spectra:rebuild-stats` once.
+
+<a name="exchange-rate-warning"></a>
+## "No Exchange Rate" Warning in the Log
+
+**Symptoms:** The log shows a warning like `Spectra: no exchange rate from EUR to USD`.
+
+A pricing catalog uses another currency than your reporting currency (the built-in Scaleway catalog is in EUR). Without a rate, Spectra counts those prices 1:1, so the costs are wrong. Add the rate to `config/spectra.php`:
+
+```php
+'costs' => [
+    'currency' => 'USD',
+    'exchange_rates' => [
+        'EUR' => 1.17, // 1 EUR is worth 1.17 USD
+    ],
+],
+```
+
+The warning is logged once per process. See [Currency Conversion](/costs#currency-conversion).
+
+<a name="budgets-after-upgrade"></a>
+## Budgets or Per-User Usage Show Nothing for Old Requests
+
+**Symptoms:** In an app with a morph map, budgets and per-user usage ignore requests recorded before the upgrade.
+
+Spectra 2.0 stores the trackable type as the morph alias (`$model->getMorphClass()`). Spectra 1.x stored the class name. Update the old rows once, as shown in the [Upgrade Guide](/upgrade#trackables-use-morph-aliases).
+
+<a name="budget-alert-once"></a>
+## Budget Alert Fired Only Once
+
+**Symptoms:** A `BudgetThresholdReached` event fired once, and not again on later requests.
+
+This is expected. Warning, critical, and exceeded alerts fire once per budget, limit, and period. See [Alerts Fire Once per Period](/budgets#alerts-fire-once).

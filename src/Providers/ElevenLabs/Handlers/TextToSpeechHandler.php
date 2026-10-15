@@ -13,8 +13,16 @@ use Spectra\Data\Metrics;
 use Spectra\Enums\ModelType;
 use Spectra\Support\MediaPersister;
 
+/**
+ * ElevenLabs text to speech (`/v1/text-to-speech/{voice_id}` and its
+ * `/stream` variant), which returns raw audio and is billed per character
+ * of the request text.
+ */
 class TextToSpeechHandler implements ExtractsModelFromRequest, Handler, HasMedia, ReturnsBinaryResponse
 {
+    /** The model the API uses when the request names none. */
+    public const DEFAULT_MODEL = 'eleven_multilingual_v2';
+
     public function modelType(): ModelType
     {
         return ModelType::Tts;
@@ -41,7 +49,7 @@ class TextToSpeechHandler implements ExtractsModelFromRequest, Handler, HasMedia
     {
         return new Metrics(
             audio: new AudioMetrics(
-                inputCharacters: isset($requestData['text']) ? mb_strlen($requestData['text']) : null,
+                inputCharacters: is_string($requestData['text'] ?? null) ? mb_strlen($requestData['text']) : null,
             ),
         );
     }
@@ -55,7 +63,9 @@ class TextToSpeechHandler implements ExtractsModelFromRequest, Handler, HasMedia
     /** @param  array<string, mixed>  $requestData */
     public function extractModelFromRequest(array $requestData, string $endpoint): ?string
     {
-        return $requestData['model_id'] ?? null;
+        $model = $requestData['model_id'] ?? null;
+
+        return is_string($model) && $model !== '' ? $model : self::DEFAULT_MODEL;
     }
 
     /**

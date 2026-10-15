@@ -1,0 +1,40 @@
+{
+  "id": "chatcmpl-7e1b2c3d-4f5a-6b7c-8d9e-0f1a2b3c4d5e",
+  "object": "chat.completion",
+  "created": 1760536800,
+  "model": "openai/gpt-oss-120b",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "reasoning": "The user asks about the termination clause. Section 12 covers it.",
+        "content": "The agreement can be terminated with 30 days written notice (Section 12.1)."
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "queue_time": 0.026894727,
+    "prompt_tokens": 4641,
+    "prompt_time": 0.009220083,
+    "completion_tokens": 1817,
+    "completion_time": 1.577712266,
+    "total_tokens": 6458,
+    "total_time": 1.586932349,
+    "prompt_tokens_details": {
+      "cached_tokens": 4608
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 512
+    }
+  },
+  "usage_breakdown": null,
+  "system_fingerprint": "fp_a09bde29de",
+  "x_groq": {
+    "id": "req_01k3hgcytaf7vsyqqdk1932swk",
+    "seed": 1428351936
+  },
+  "service_tier": "on_demand"
+}

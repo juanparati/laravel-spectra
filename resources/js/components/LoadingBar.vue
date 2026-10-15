@@ -16,7 +16,7 @@ defineProps({
     right: 0;
     height: 2px;
     z-index: 100;
-    background: linear-gradient(90deg, transparent, var(--loading-color, #6366f1) 50%, transparent);
+    background: linear-gradient(90deg, transparent 0%, #ff5f6d 20%, #ffa94d 35%, #4ade80 55%, #38bdf8 70%, #8b7dff 85%, transparent 100%);
     background-size: 200% 100%;
     animation: loading-slide 1.2s linear infinite;
 }

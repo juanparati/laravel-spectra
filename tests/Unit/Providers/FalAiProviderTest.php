@@ -7,6 +7,8 @@ use Spectra\Data\ImageMetrics;
 use Spectra\Data\Metrics;
 use Spectra\Enums\ModelType;
 use Spectra\Providers\FalAi\Handlers\ImageHandler;
+use Spectra\Providers\FalAi\Handlers\QueueStatusHandler;
+use Spectra\Providers\FalAi\Handlers\VideoHandler;
 use Spectra\Support\ProviderRegistry;
 
 it('returns falai as provider', function () {
@@ -142,4 +144,65 @@ it('extracts model from request via provider', function () {
     $provider = $this->falAiProvider();
 
     expect($provider->extractModelFromRequest([], '/fal-ai/flux-pro/kontext'))->toBe('fal-ai/flux-pro/kontext');
+});
+
+it('sends queue results to the result handlers and status calls to the status handler', function (string $endpoint, string $handler) {
+    expect($this->falAiProvider()->resolveHandler($endpoint))->toBeInstanceOf($handler);
+})->with([
+    'result with sub-path' => ['/fal-ai/flux/dev/requests/764cabcf-b745-4b3e-ae38-1200304cf45b', ImageHandler::class],
+    'result without sub-path' => ['/fal-ai/flux/requests/764cabcf-b745-4b3e-ae38-1200304cf45b', ImageHandler::class],
+    'result /response' => ['/fal-ai/flux/dev/requests/764cabcf-b745-4b3e-ae38-1200304cf45b/response', ImageHandler::class],
+    'status' => ['/fal-ai/flux/dev/requests/764cabcf-b745-4b3e-ae38-1200304cf45b/status', QueueStatusHandler::class],
+    'status stream' => ['/fal-ai/flux/requests/764cabcf-b745-4b3e-ae38-1200304cf45b/status/stream', QueueStatusHandler::class],
+    'cancel' => ['/fal-ai/flux/requests/764cabcf-b745-4b3e-ae38-1200304cf45b/cancel', QueueStatusHandler::class],
+]);
+
+it('picks the video handler for video results', function () {
+    $body = json_decode(file_get_contents(__DIR__.'/../../responses/falai/queue-result-video.json'), true);
+
+    expect($this->falAiProvider()->resolveHandler('/fal-ai/kling-video/requests/abc', $body))->toBeInstanceOf(VideoHandler::class);
+});
+
+it('takes the model from the path before /requests/', function () {
+    $handler = new ImageHandler;
+
+    expect($handler->extractModelFromRequest([], '/fal-ai/flux/dev/requests/abc'))->toBe('fal-ai/flux/dev')
+        ->and($handler->extractModelFromRequest([], '/fal-ai/flux/requests/abc/response'))->toBe('fal-ai/flux')
+        ->and($handler->extractModelFromRequest([], '/workflows/acme/pipeline/requests/abc'))->toBe('workflows/acme/pipeline');
+});
+
+it('uses the request id of a queued result as the response id', function () {
+    $provider = $this->falAiProvider();
+
+    expect($provider->extractResponseId(['images' => []], '/fal-ai/flux/requests/764cabcf'))->toBe('764cabcf')
+        ->and($provider->extractResponseId(['images' => []], '/fal-ai/flux/dev/requests/764cabcf/response'))->toBe('764cabcf')
+        ->and($provider->extractResponseId(['images' => []], '/fal-ai/flux/dev'))->toBeNull();
+});
+
+it('skips queue receipts and status replies', function () {
+    $handler = new ImageHandler;
+    $load = fn (string $file) => json_decode(file_get_contents(__DIR__."/../../responses/falai/{$file}"), true);
+
+    expect($handler->shouldSkipResponse($load('queue-submit.json')))->toBeTrue()
+        ->and($handler->shouldSkipResponse($load('queue-status-in-progress.json')))->toBeTrue()
+        ->and($handler->shouldSkipResponse($load('queue-status-completed.json')))->toBeTrue()
+        ->and($handler->shouldSkipResponse($load('queue-result-flux-dev.json')))->toBeFalse()
+        ->and($handler->shouldSkipResponse($load('sync-image.json')))->toBeFalse();
+});
+
+it('rounds each image up to whole 1024 x 1024 megapixels', function () {
+    $metrics = (new ImageHandler)->extractMetrics([], ['images' => [
+        ['url' => 'a', 'width' => 1024, 'height' => 1024],
+        ['url' => 'b', 'width' => 1920, 'height' => 1080],
+        ['url' => 'c', 'width' => 512, 'height' => 512],
+    ]]);
+
+    expect($metrics->image->count)->toBe(3)
+        ->and($metrics->image->megapixels)->toBe(4.0);
+});
+
+it('leaves megapixels unknown when an image has no size', function () {
+    $metrics = (new ImageHandler)->extractMetrics([], ['images' => [['url' => 'a', 'width' => null, 'height' => null]]]);
+
+    expect($metrics->image->megapixels)->toBeNull();
 });

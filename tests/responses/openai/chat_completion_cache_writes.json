@@ -1,0 +1,37 @@
+{
+  "id": "chatcmpl-DQ7f2kZb1t3VhJ0x8pXcN4mWqYzA",
+  "object": "chat.completion",
+  "created": 1792051200,
+  "model": "gpt-5.6-sol",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The contract renews on 1 March and needs 60 days' notice to cancel.",
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12000,
+    "completion_tokens": 900,
+    "total_tokens": 12900,
+    "prompt_tokens_details": {
+      "cached_tokens": 8000,
+      "cache_write_tokens": 3000,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 600,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": null
+}

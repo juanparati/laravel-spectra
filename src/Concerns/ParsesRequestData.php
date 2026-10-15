@@ -5,15 +5,121 @@ declare(strict_types=1);
 namespace Spectra\Concerns;
 
 use Illuminate\Http\Client\Request;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\StreamInterface;
 
 /**
- * Shared logic for extracting request data from Laravel HTTP client requests.
+ * Shared logic for extracting request data from outgoing provider requests.
  *
- * Handles both JSON and multipart form data, extracting text fields
- * while skipping file uploads.
+ * Handles JSON, form and multipart bodies, extracting text fields while
+ * skipping file uploads. A body that cannot be rewound is never read, so the
+ * request still goes out intact.
  */
 trait ParsesRequestData
 {
+    /**
+     * @return array<string, mixed>
+     */
+    protected static function parsePsrRequestData(RequestInterface $request): array
+    {
+        try {
+            $body = $request->getBody();
+
+            if (! $body->isSeekable()) {
+                return [];
+            }
+
+            $contentType = $request->getHeaderLine('Content-Type');
+
+            if (str_contains($contentType, 'multipart/form-data')) {
+                return static::parseMultipartStream($body, $contentType);
+            }
+
+            $contents = (string) $body;
+            $body->rewind();
+
+            if (str_contains($contentType, 'application/x-www-form-urlencoded')) {
+                parse_str($contents, $fields);
+
+                return $fields; // @phpstan-ignore return.type
+            }
+
+            $decoded = json_decode($contents, true);
+
+            return is_array($decoded) ? $decoded : [];
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * Text fields of a multipart body. Only the first and last 64 KB are read:
+     * text fields sit before or after the uploaded file, and the file itself
+     * can be large.
+     *
+     * @return array<string, mixed>
+     */
+    protected static function parseMultipartStream(StreamInterface $body, string $contentType): array
+    {
+        preg_match('/boundary=(.+?)(?:;|$)/', $contentType, $matches);
+        $boundary = trim($matches[1] ?? '', '"');
+
+        if ($boundary === '') {
+            return [];
+        }
+
+        $window = 65536;
+        $size = $body->getSize();
+
+        $body->rewind();
+        $head = $body->read($window);
+
+        $tail = '';
+        if ($size !== null && $size > $window * 2) {
+            $body->seek($size - $window);
+            $tail = $body->read($window);
+        } elseif ($size === null || $size > $window) {
+            $tail = $body->getContents();
+            $head .= $tail;
+            $tail = '';
+        }
+
+        $body->rewind();
+
+        return array_merge(
+            static::multipartTextFields($head, $boundary),
+            static::multipartTextFields($tail, $boundary),
+        );
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected static function multipartTextFields(string $body, string $boundary): array
+    {
+        $fields = [];
+
+        foreach (explode('--'.$boundary, $body) as $part) {
+            $part = ltrim($part, "\r\n");
+
+            if ($part === '' || str_starts_with($part, '--') || str_contains($part, 'filename=')) {
+                continue;
+            }
+
+            if (! preg_match('/^Content-Disposition:.*?name="([^"]+)"/im', $part, $nameMatch)) {
+                continue;
+            }
+
+            $headerEnd = strpos($part, "\r\n\r\n");
+
+            if ($headerEnd !== false) {
+                $fields[$nameMatch[1]] = rtrim(substr($part, $headerEnd + 4), "\r\n");
+            }
+        }
+
+        return $fields;
+    }
+
     /**
      * @param  Request  $request
      * @return array<string, mixed>

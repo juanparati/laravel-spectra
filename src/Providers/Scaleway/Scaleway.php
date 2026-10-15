@@ -10,6 +10,12 @@ use Spectra\Providers\Scaleway\Handlers\EmbeddingHandler;
 use Spectra\Providers\Scaleway\Handlers\RerankHandler;
 use Spectra\Providers\Scaleway\Handlers\TranscriptionHandler;
 
+/**
+ * Scaleway Generative APIs (serverless), an OpenAI-compatible API hosted in
+ * Europe at `api.scaleway.ai`, priced in euros.
+ *
+ * Dedicated deployments run on their own hosts and are not tracked.
+ */
 class Scaleway extends Provider
 {
     public function getProvider(): string

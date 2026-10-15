@@ -23,6 +23,8 @@ it('should build a model definition with all fields', function () {
         'can_generate_images' => false,
         'can_generate_video' => false,
         'can_generate_audio' => false,
+        'aliases' => [],
+        'retired_on' => null,
     ]);
 });
 
@@ -57,6 +59,12 @@ it('should build a model with pricing tiers', function () {
         'cache_write_5m_price' => null,
         'cache_write_1h_price' => null,
         'price_per_unit' => null,
+        'audio_input_price' => null,
+        'audio_output_price' => null,
+        'image_input_price' => null,
+        'image_output_price' => null,
+        'above_input_tokens' => null,
+        'since' => null,
     ]);
 
     expect($tiers[1])->toBe([
@@ -67,6 +75,12 @@ it('should build a model with pricing tiers', function () {
         'cache_write_5m_price' => null,
         'cache_write_1h_price' => null,
         'price_per_unit' => null,
+        'audio_input_price' => null,
+        'audio_output_price' => null,
+        'image_input_price' => null,
+        'image_output_price' => null,
+        'above_input_tokens' => null,
+        'since' => null,
     ]);
 });
 
@@ -123,6 +137,12 @@ it('should build a model with cost shorthand for standard tier', function () {
         'cache_write_5m_price' => null,
         'cache_write_1h_price' => null,
         'price_per_unit' => null,
+        'audio_input_price' => null,
+        'audio_output_price' => null,
+        'image_input_price' => null,
+        'image_output_price' => null,
+        'above_input_tokens' => null,
+        'since' => null,
     ]);
 });
 

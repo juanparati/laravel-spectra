@@ -4,16 +4,13 @@ declare(strict_types=1);
 
 namespace Spectra\Tests\Concerns;
 
-use Spectra\Spectra;
 use Spectra\Watchers\HttpWatcher;
 
 trait InteractsWithHttpWatcher
 {
     protected function makeHttpWatcher(): HttpWatcher
     {
-        $manager = \Mockery::mock(Spectra::class);
-
-        return new HttpWatcher($manager);
+        return new HttpWatcher;
     }
 
     protected function callHttpWatcherProtected(object $instance, string $method, mixed ...$arguments): mixed

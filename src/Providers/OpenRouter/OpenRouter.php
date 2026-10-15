@@ -5,9 +5,18 @@ declare(strict_types=1);
 namespace Spectra\Providers\OpenRouter;
 
 use Spectra\Providers\OpenRouter\Handlers\ChatHandler;
+use Spectra\Providers\OpenRouter\Handlers\ImageGenerationHandler;
 use Spectra\Providers\OpenRouter\Handlers\ImageHandler;
+use Spectra\Providers\OpenRouter\Handlers\VideoHandler;
 use Spectra\Providers\Provider;
 
+/**
+ * OpenRouter: one OpenAI-compatible API in front of many model providers.
+ *
+ * Every response reports the cost OpenRouter charged (`usage.cost`), which
+ * Spectra records as the exact cost; the pricing catalog is only a fallback
+ * for responses without it.
+ */
 class OpenRouter extends Provider
 {
     public function getProvider(): string
@@ -27,6 +36,8 @@ class OpenRouter extends Provider
         return [
             app(ChatHandler::class),
             app(ImageHandler::class),
+            app(ImageGenerationHandler::class),
+            app(VideoHandler::class),
         ];
     }
 }

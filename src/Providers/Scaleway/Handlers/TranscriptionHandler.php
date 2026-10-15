@@ -13,6 +13,10 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 
+/**
+ * Scaleway audio transcription (Whisper), billed per audio minute. The
+ * length is `duration` (verbose JSON) or a `usage` of type `duration`.
+ */
 class TranscriptionHandler implements ExtractsModelFromResponse, Handler
 {
     use ExtractsModelField;
@@ -25,7 +29,10 @@ class TranscriptionHandler implements ExtractsModelFromResponse, Handler
 
     public function endpoints(): array
     {
-        return ['/{project_id}/v1/audio/transcriptions'];
+        return [
+            '/v1/audio/transcriptions',
+            '/{project_id}/v1/audio/transcriptions',
+        ];
     }
 
     /**

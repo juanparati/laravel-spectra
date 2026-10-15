@@ -1,0 +1,80 @@
+{
+  "created_at": 1760536800,
+  "id": "ad5663da-63e6-86c6-e0be-ff15effa8357",
+  "max_output_tokens": null,
+  "model": "grok-4.7",
+  "object": "response",
+  "output": [
+    {
+      "id": "ws_ad5663da-63e6-86c6-e0be-ff15effa8357_call_1",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {"type": "search", "query": "SpaceXSI latest update"}
+    },
+    {
+      "id": "ws_ad5663da-63e6-86c6-e0be-ff15effa8357_call_2",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {"type": "search", "query": "SpaceXSI news October 2026"}
+    },
+    {
+      "id": "xs_ad5663da-63e6-86c6-e0be-ff15effa8357_call_3",
+      "type": "x_search_call",
+      "status": "completed"
+    },
+    {
+      "id": "",
+      "summary": [{"text": "Search the web and X, then summarise.", "type": "summary_text"}],
+      "type": "reasoning",
+      "status": "completed"
+    },
+    {
+      "content": [
+        {
+          "type": "output_text",
+          "text": "SpaceXSI released Grok 4.7 this week.",
+          "logprobs": null,
+          "annotations": []
+        }
+      ],
+      "id": "msg_ad5663da-63e6-86c6-e0be-ff15effa8357",
+      "role": "assistant",
+      "type": "message",
+      "status": "completed"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "previous_response_id": null,
+  "reasoning": {"effort": "high", "summary": "detailed"},
+  "service_tier": "default",
+  "temperature": null,
+  "text": {"format": {"type": "text"}},
+  "tool_choice": "auto",
+  "tools": [{"type": "web_search"}, {"type": "x_search"}],
+  "top_p": null,
+  "usage": {
+    "input_tokens": 12000,
+    "input_tokens_details": {"cached_tokens": 4000},
+    "output_tokens": 500,
+    "output_tokens_details": {"reasoning_tokens": 1500},
+    "total_tokens": 14000,
+    "num_sources_used": 0,
+    "num_server_side_tools_used": 3,
+    "server_side_tool_usage_details": {
+      "code_interpreter_calls": 0,
+      "document_search_calls": 0,
+      "file_search_calls": 0,
+      "image_generation_calls": 0,
+      "mcp_calls": 0,
+      "web_search_calls": 2,
+      "x_posts_fetched": 10,
+      "x_search_calls": 1,
+      "x_users_fetched": 1
+    },
+    "cost_in_usd_ticks": 1000000000
+  },
+  "user": null,
+  "incomplete_details": null,
+  "status": "completed",
+  "store": true
+}

@@ -1,0 +1,10 @@
+data: {"id":"chatcmpl-7a2d9c1e","object":"chat.completion.chunk","created":1760000100,"model":"qwen3.8-27b","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-7a2d9c1e","object":"chat.completion.chunk","created":1760000100,"model":"qwen3.8-27b","choices":[{"index":0,"delta":{"content":"Paris"},"logprobs":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-7a2d9c1e","object":"chat.completion.chunk","created":1760000100,"model":"qwen3.8-27b","choices":[{"index":0,"delta":{"content":" is the capital."},"logprobs":null,"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-7a2d9c1e","object":"chat.completion.chunk","created":1760000100,"model":"qwen3.8-27b","choices":[],"usage":{"prompt_tokens":2000,"completion_tokens":100,"total_tokens":2100,"prompt_tokens_details":{"cached_tokens":1000}}}
+
+data: [DONE]
+

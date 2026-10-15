@@ -8,12 +8,24 @@ use Spectra\Concerns\ExtractsModelField;
 use Spectra\Concerns\MatchesEndpoints;
 use Spectra\Contracts\ExtractsModelFromResponse;
 use Spectra\Contracts\Handler;
+use Spectra\Contracts\StreamsResponse;
 use Spectra\Data\AudioMetrics;
 use Spectra\Data\Metrics;
-use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\OpenAI\OpenAiUsage;
+use Spectra\Providers\OpenAI\Streaming\TranscriptionStreaming;
+use Spectra\Support\Tracking\StreamHandler;
 
-class TranscriptionHandler implements ExtractsModelFromResponse, Handler
+/**
+ * Speech to text: transcriptions and translations.
+ *
+ * Token-priced models (gpt-4o-transcribe family) report `usage.type: tokens`
+ * with audio input and text output tokens. Minute-priced models (whisper-1,
+ * gpt-transcribe) report `usage.type: duration` with the billed seconds, or
+ * a top-level `duration` in `verbose_json`. The `text`, `srt` and `vtt`
+ * formats return plain text with no usage, so nothing can be priced for them.
+ */
+class TranscriptionHandler implements ExtractsModelFromResponse, Handler, StreamsResponse
 {
     use ExtractsModelField;
     use MatchesEndpoints;
@@ -37,24 +49,14 @@ class TranscriptionHandler implements ExtractsModelFromResponse, Handler
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
-        $usage = $responseData['usage'] ?? [];
+        $usage = is_array($responseData['usage'] ?? null) ? $responseData['usage'] : [];
 
-        // Token-based usage: newer API responses may include input_tokens/output_tokens
-        $promptTokens = (int) ($usage['prompt_tokens'] ?? $usage['input_tokens'] ?? 0);
-        $completionTokens = (int) ($usage['completion_tokens'] ?? $usage['output_tokens'] ?? 0);
-
-        // Duration: top-level "duration" (verbose format) or usage.seconds (duration-based billing)
-        $duration = isset($responseData['duration'])
-            ? (float) $responseData['duration']
-            : (isset($usage['type'], $usage['seconds']) && $usage['type'] === 'duration'
-                ? (float) $usage['seconds']
-                : null);
+        // The billed seconds win over the measured audio length.
+        $duration = OpenAiUsage::transcriptionSeconds($usage)
+            ?? (is_numeric($responseData['duration'] ?? null) ? (float) $responseData['duration'] : null);
 
         return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: $promptTokens,
-                completionTokens: $completionTokens,
-            ),
+            tokens: OpenAiUsage::fromTranscription($usage),
             audio: new AudioMetrics(
                 durationSeconds: $duration,
             ),
@@ -65,5 +67,10 @@ class TranscriptionHandler implements ExtractsModelFromResponse, Handler
     public function extractResponse(array $response): ?string
     {
         return $response['text'] ?? null;
+    }
+
+    public function streamingHandler(): StreamHandler
+    {
+        return new TranscriptionStreaming;
     }
 }

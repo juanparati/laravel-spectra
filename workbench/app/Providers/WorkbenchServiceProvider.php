@@ -11,6 +11,6 @@ class WorkbenchServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        Gate::define('viewSpectra', fn () => true);
+        Gate::define('viewSpectra', fn (?object $user = null) => true);
     }
 }

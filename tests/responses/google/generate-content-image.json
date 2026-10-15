@@ -1,0 +1,49 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "Here is a watercolor of a lighthouse at dusk.",
+            "thoughtSignature": "EqkCCqYCAdHtim8w"
+          },
+          {
+            "inlineData": {
+              "mimeType": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            },
+            "thoughtSignature": "EqkCCqYCAdHtim9x"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 20,
+    "candidatesTokenCount": 1150,
+    "totalTokenCount": 1370,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 20
+      }
+    ],
+    "candidatesTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 30
+      },
+      {
+        "modality": "IMAGE",
+        "tokenCount": 1120
+      }
+    ],
+    "thoughtsTokenCount": 200,
+    "serviceTier": "standard"
+  },
+  "modelVersion": "gemini-3.1-flash-image",
+  "responseId": "Cn7vaPv1A9-X7M8PnLyO0Qk"
+}

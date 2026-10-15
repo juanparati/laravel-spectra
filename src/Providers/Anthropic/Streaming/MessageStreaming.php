@@ -4,10 +4,27 @@ declare(strict_types=1);
 
 namespace Spectra\Providers\Anthropic\Streaming;
 
+use Spectra\Providers\Anthropic\Anthropic;
+use Spectra\Providers\Anthropic\Handlers\MessageHandler;
 use Spectra\Support\Tracking\StreamHandler;
 
+/**
+ * Reads a streamed Messages API response (server-sent events).
+ *
+ * Usage arrives in two places: `message_start` carries the first counts and
+ * every `message_delta` carries CUMULATIVE counts that replace them. With
+ * server tools the delta's `input_tokens` grows past the start value, so the
+ * latest value of each field is kept, never a sum.
+ */
 class MessageStreaming extends StreamHandler
 {
+    /**
+     * The raw Anthropic usage seen so far in this stream, before normalising.
+     *
+     * @var array<string, mixed>
+     */
+    protected array $rawUsage = [];
+
     /**
      * Extract text from Anthropic streaming chunk.
      *
@@ -25,11 +42,12 @@ class MessageStreaming extends StreamHandler
     }
 
     /**
-     * Extract usage from Anthropic streaming chunk.
+     * message_start: {"message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 5, ...}}}
+     * message_delta: {"usage": {"input_tokens": 12, "output_tokens": 20, "server_tool_use": {...}}}
      *
-     * Anthropic splits usage across two events:
-     *   message_start: {"message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": 5}}}
-     *   message_delta:  {"usage": {"output_tokens": 20}}
+     * Returns the normalised TokenMetrics keys plus `tool_calls` (server
+     * tools), `pricing_tier` (fast mode / service tier) and `cost_multiplier`
+     * (US-only inference) when the stream reports them.
      *
      * @param  array<string, mixed>  $data
      * @param  array<string, mixed>  $currentUsage
@@ -37,23 +55,19 @@ class MessageStreaming extends StreamHandler
      */
     public function usage(array $data, array $currentUsage): array
     {
-        // message_start — input tokens
-        if (($data['type'] ?? null) === 'message_start' && isset($data['message']['usage'])) {
-            $currentUsage['prompt_tokens'] = $data['message']['usage']['input_tokens'] ?? 0;
-            $currentUsage['cached_tokens'] = $data['message']['usage']['cache_read_input_tokens'] ?? 0;
-            $currentUsage['cache_creation_tokens'] = $data['message']['usage']['cache_creation_input_tokens'] ?? 0;
+        $type = $data['type'] ?? null;
 
+        if ($type === 'message_start' && is_array($data['message']['usage'] ?? null)) {
+            // A new message: forget anything from an earlier stream.
+            $this->rawUsage = $data['message']['usage'];
+        } elseif ($type === 'message_delta' && is_array($data['usage'] ?? null)) {
+            // Delta counts are cumulative: the latest value of each field wins.
+            $this->rawUsage = array_replace($this->rawUsage, $data['usage']);
+        } else {
             return $currentUsage;
         }
 
-        // message_delta — output tokens
-        if (($data['type'] ?? null) === 'message_delta' && isset($data['usage'])) {
-            $currentUsage['completion_tokens'] = $data['usage']['output_tokens'] ?? 0;
-
-            return $currentUsage;
-        }
-
-        return $currentUsage;
+        return $this->normalised($currentUsage);
     }
 
     /**
@@ -91,5 +105,35 @@ class MessageStreaming extends StreamHandler
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $currentUsage
+     * @return array<string, mixed>
+     */
+    protected function normalised(array $currentUsage): array
+    {
+        $usage = array_replace(
+            $currentUsage,
+            MessageHandler::tokensFromUsage($this->rawUsage)->toUsageArray(),
+        );
+
+        $toolCalls = MessageHandler::serverToolCalls($this->rawUsage);
+        $tier = Anthropic::pricingTierFromUsage($this->rawUsage);
+        $multiplier = Anthropic::costMultiplierForGeo($this->rawUsage['inference_geo'] ?? null);
+
+        if ($toolCalls !== []) {
+            $usage['tool_calls'] = $toolCalls;
+        }
+
+        if ($tier !== null) {
+            $usage['pricing_tier'] = $tier;
+        }
+
+        if ($multiplier !== null) {
+            $usage['cost_multiplier'] = $multiplier;
+        }
+
+        return $usage;
     }
 }

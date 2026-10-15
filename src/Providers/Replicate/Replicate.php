@@ -4,12 +4,19 @@ declare(strict_types=1);
 
 namespace Spectra\Providers\Replicate;
 
+use Spectra\Contracts\ExtractsPricingTierFromResponse;
+use Spectra\Enums\PricingTier;
 use Spectra\Providers\Provider;
 use Spectra\Providers\Replicate\Handlers\ImageHandler;
 use Spectra\Providers\Replicate\Handlers\TextHandler;
 use Spectra\Providers\Replicate\Handlers\VideoHandler;
+use Spectra\Support\Pricing\PricingLookup;
 
-class Replicate extends Provider
+/**
+ * Replicate predictions: official models, community versions and
+ * deployments, created and polled through the same prediction object.
+ */
+class Replicate extends Provider implements ExtractsPricingTierFromResponse
 {
     public function getProvider(): string
     {
@@ -22,9 +29,9 @@ class Replicate extends Provider
     }
 
     /**
-     * Order matters: all handlers share the same endpoint pattern,
-     * so disambiguation relies on MatchesResponseShape (checked in reverse order).
-     * VideoHandler is checked first (single URL), then TextHandler, then ImageHandler.
+     * All handlers share the prediction endpoints; the response decides
+     * (model type, output files, token counts). ImageHandler comes first,
+     * so it takes predictions nobody else claims.
      */
     public function handlers(): array
     {
@@ -33,5 +40,26 @@ class Replicate extends Provider
             app(TextHandler::class),
             app(VideoHandler::class),
         ];
+    }
+
+    /**
+     * Video models such as Veo 3.1 Lite charge more for 1080p output. The
+     * prediction echoes its input, so the resolution is known even for
+     * polls. Only models with an `hd` price get the `hd` tier.
+     *
+     * @param  array<string, mixed>  $responseData
+     */
+    public function extractPricingTierFromResponse(array $responseData): ?string
+    {
+        $resolution = $responseData['input']['resolution'] ?? null;
+        $model = $responseData['model'] ?? null;
+
+        if (! is_string($resolution) || strtolower($resolution) !== '1080p' || ! is_string($model)) {
+            return null;
+        }
+
+        $tiers = app(PricingLookup::class)->getModelData('replicate', $model)['tiers'] ?? [];
+
+        return isset($tiers[PricingTier::Hd->value]) ? PricingTier::Hd->value : null;
     }
 }

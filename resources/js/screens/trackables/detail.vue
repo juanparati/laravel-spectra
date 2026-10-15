@@ -15,7 +15,7 @@ import ProviderLogo from '@/components/ProviderLogo.vue';
 
 const route = useRoute();
 const router = useRouter();
-const { formatNumber, formatCurrency, currencySymbol, formatDuration, formatDurationSeconds, truncate, providerChartColor, apiRequest } = useHelpers();
+const { formatNumber, formatCompact, formatShortDate, formatCurrency, currencySymbol, formatDuration, formatDurationSeconds, truncate, providerChartColor, apiRequest } = useHelpers();
 const { period, startDate, endDate, periodLabel } = usePeriodQuery();
 const { providers, loadProviders, providerDisplayName } = useProviders();
 const { createBarChart, createLineChart, createDoughnutChart } = useCharts();
@@ -145,7 +145,7 @@ const renderCostChart = () => {
 
     const data = trackable.value.costs_by_date;
     costChart = createBarChart(costChartRef.value, {
-        labels: data.map(d => d.date),
+        labels: data.map(d => formatShortDate(d.date)),
         values: data.map(d => d.cost / 100),
     }, {
         label: 'Cost',
@@ -161,7 +161,7 @@ const renderRequestsChart = () => {
 
     const data = requestsByDate.value;
     requestsChart = createLineChart(requestsChartRef.value, {
-        labels: data.map(d => d.date),
+        labels: data.map(d => formatShortDate(d.date)),
         values: data.map(d => d.count),
     }, {
         label: 'Requests',
@@ -176,13 +176,28 @@ const renderProviderChart = () => {
     providerChart = createDoughnutChart(providerChartRef.value, {
         labels: data.map(d => providerDisplayName(d.provider)),
         values: data.map(d => d.requests),
-        colors: data.map(d => providerChartColor(d.provider)),
+        colors: () => data.map(d => providerChartColor(d.provider)),
     }, {
+        legend: false,
         chartOptions: {
             animation: false,
         },
     });
 };
+
+// Legend rows for the provider doughnut, with counts and shares.
+const providerRows = computed(() => {
+    const rows = trackable.value?.usage_by_provider || [];
+    const total = rows.reduce((sum, row) => sum + Number(row.requests || 0), 0) || 1;
+
+    return rows.map((row) => ({
+        provider: row.provider,
+        label: providerDisplayName(row.provider),
+        count: Number(row.requests || 0),
+        share: (Number(row.requests || 0) / total) * 100,
+        color: providerChartColor(row.provider),
+    }));
+});
 
 const switchTrendTab = async (tab) => {
     trendTab.value = tab;
@@ -219,6 +234,18 @@ const showImages = computed(() => ['full', 'image'].includes(layout.value));
 const showVideos = computed(() => ['full', 'video'].includes(layout.value));
 const showTts = computed(() => ['full', 'audio'].includes(layout.value));
 const showStt = computed(() => ['full', 'audio'].includes(layout.value));
+
+// Media usage shown only when the period has that kind of traffic.
+const mediaCards = computed(() => {
+    const t = trackable.value || {};
+
+    return [
+        { key: 'images', show: showImages.value && t.total_images > 0, label: 'Images', value: formatNumber(t.total_images), unit: t.total_images === 1 ? 'image' : 'images' },
+        { key: 'videos', show: showVideos.value && t.total_videos > 0, label: 'Videos', value: formatNumber(t.total_videos), unit: t.total_videos === 1 ? 'video' : 'videos' },
+        { key: 'tts', show: showTts.value && t.total_tts_characters > 0, label: 'Text-to-speech', value: formatCompact(t.total_tts_characters), unit: 'characters' },
+        { key: 'stt', show: showStt.value && t.stt_duration_seconds > 0, label: 'Speech-to-text', value: formatDurationSeconds(t.stt_duration_seconds), unit: 'audio' },
+    ].filter((card) => card.show);
+});
 
 const loadConfig = async () => {
     try {
@@ -316,91 +343,59 @@ onUnmounted(() => {
             @change="onRangeChange"
         />
 
-        <!-- Stats -->
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-            <StatCard label="Total Requests" gradient="from-primary-500 to-cyan-500" :loading="loading" :period-label="periodLabel">
-                <div class="stat-value !mt-1 !text-[2rem]">{{ formatNumber(trackable?.total_requests ?? 0) }}</div>
+        <!-- Headline numbers -->
+        <div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Requests" :loading="loading">
+                <div class="stat-value">{{ formatNumber(trackable?.total_requests ?? 0) }}</div>
             </StatCard>
-            <StatCard label="Total Cost" gradient="from-emerald-500 to-teal-500" :loading="loading" :period-label="periodLabel" skeleton-width="70%">
-                <div class="stat-value !mt-1 !text-[2rem]">{{ formatCurrency(trackable?.total_cost) }}</div>
-            </StatCard>
-            <StatCard v-if="showTokens" label="Tokens" gradient="from-violet-500 to-indigo-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(trackable?.total_tokens || 0) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">tokens</span>
-                </div>
+            <StatCard label="Spend" :loading="loading" skeleton-width="70%">
+                <div class="stat-value">{{ formatCurrency(trackable?.total_cost) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Text + Embeddings</div>
+                    <div v-if="trackable?.total_requests" class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ formatCurrency((trackable.total_cost || 0) / trackable.total_requests) }} per request on average</div>
                 </template>
             </StatCard>
-            <StatCard v-if="showImages" label="Images Generated" gradient="from-fuchsia-500 to-pink-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(trackable?.total_images || 0) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">images</span>
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ periodLabel }}</div>
-                </template>
+            <StatCard v-if="showTokens" label="Tokens" :loading="loading" skeleton-width="50%">
+                <div class="stat-value" :title="formatNumber(trackable?.total_tokens || 0) + ' tokens'">{{ formatCompact(trackable?.total_tokens || 0) }}</div>
             </StatCard>
-            <StatCard v-if="showVideos" label="Videos Generated" gradient="from-amber-500 to-orange-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(trackable?.total_videos || 0) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">videos</span>
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ periodLabel }}</div>
+            <StatCard label="Average latency" :loading="loading" skeleton-width="40%">
+                <template #action>
+                    <button
+                        v-if="latencyByModelType.length"
+                        type="button"
+                        class="text-xs font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400"
+                        @click="openLatencyBreakdown"
+                    >
+                        By type
+                    </button>
                 </template>
-            </StatCard>
-            <StatCard v-if="showTts" label="Text-to-Speech" gradient="from-cyan-500 to-blue-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(trackable?.total_tts_characters || 0) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">chars</span>
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ formatDurationSeconds(trackable?.tts_duration_seconds || 0) }} synthesized</div>
-                </template>
-            </StatCard>
-            <StatCard v-if="showStt" label="Speech-to-Text" gradient="from-sky-500 to-indigo-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatDurationSeconds(trackable?.stt_duration_seconds || 0) }}
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Total transcribed audio</div>
-                </template>
-            </StatCard>
-            <StatCard label="Avg Latency" gradient="from-rose-500 to-pink-500" :loading="loading" skeleton-width="40%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ trackable ? formatDuration(trackable.avg_latency) : '0ms' }}
-                    <template v-if="latencyByModelType.length">
-                        <span class="text-sm font-medium text-gray-400"> / </span>
-                        <button
-                            type="button"
-                            class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                            @click="openLatencyBreakdown"
-                        >
-                            stats
-                        </button>
-                    </template>
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Across successful requests</div>
-                </template>
+                <div class="stat-value">{{ trackable ? formatDuration(trackable.avg_latency) : '0ms' }}</div>
             </StatCard>
         </div>
 
-        <!-- Charts -->
-        <div class="flex items-center justify-between mb-3 px-1">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider">Trends & Breakdown</h3>
-            <span class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">{{ periodLabel }}</span>
+        <!-- Media usage (only kinds that appear in this period) -->
+        <div
+            v-if="!loading && mediaCards.length"
+            class="card mb-4 grid grid-cols-1 divide-y divide-gray-100 sm:divide-x sm:divide-y-0 dark:divide-gray-800"
+            :class="{ 1: 'sm:grid-cols-1', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-4' }[mediaCards.length]"
+        >
+            <div v-for="card in mediaCards" :key="card.key" class="px-5 py-3.5">
+                <div class="stat-label">{{ card.label }}</div>
+                <div class="mt-0.5 flex items-baseline gap-1.5">
+                    <span class="text-lg font-semibold tracking-tight text-gray-900 tabular-nums dark:text-white">{{ card.value }}</span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ card.unit }}</span>
+                </div>
+            </div>
         </div>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+
+        <!-- Charts -->
+        <div class="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div class="lg:col-span-2 card">
                 <div class="card-header flex-wrap gap-3">
                     <div>
                         <h3 class="text-sm font-semibold">{{ trendTab === 'cost' ? 'Cost Over Time' : 'Requests Over Time' }}</h3>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ trendTab === 'cost' ? 'Daily cost trend' : 'Daily request volume' }}</p>
                     </div>
-                    <div class="inline-flex items-center p-1 rounded-lg bg-gray-100 dark:bg-gray-700/60">
+                    <div class="inline-flex items-center p-1 rounded-lg bg-gray-100 dark:bg-gray-800/80">
                         <button
                             @click="switchTrendTab('cost')"
                             :class="[
@@ -441,27 +436,42 @@ onUnmounted(() => {
                     <canvas v-show="!loading && !loadingRequestsByDate && trendTab === 'requests' && requestsByDate?.length" ref="requestsChartRef" height="100"></canvas>
                 </div>
             </div>
-            <div class="card">
+            <div class="card flex flex-col">
                 <div class="card-header">
                     <div>
-                        <h3 class="text-sm font-semibold">Request Breakdown</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">By provider</p>
+                        <h3>Breakdown</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Requests by provider</p>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div v-if="loading" class="flex items-center justify-center" style="height: 200px">
-                        <div class="w-32 h-32 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
+                <div class="card-body flex flex-1 flex-col gap-5">
+                    <div v-if="loading" class="flex h-40 items-center justify-center">
+                        <div class="h-32 w-32 animate-pulse rounded-full bg-gray-100 dark:bg-gray-800"></div>
                     </div>
                     <div v-show="!loading && !trackable?.usage_by_provider?.length" class="empty-state py-12">
-                        <p class="empty-state-description">No provider data available</p>
+                        <p class="empty-state-description">No provider data in this period</p>
                     </div>
-                    <canvas v-show="!loading && trackable?.usage_by_provider?.length" ref="providerChartRef" height="200"></canvas>
+                    <div v-show="!loading && trackable?.usage_by_provider?.length" class="mx-auto w-40">
+                        <canvas ref="providerChartRef"></canvas>
+                    </div>
+                    <ul v-if="!loading" class="space-y-2 text-sm">
+                        <li v-for="row in providerRows" :key="row.provider" class="flex items-center gap-2.5">
+                            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" :style="{ backgroundColor: row.color }" aria-hidden="true"></span>
+                            <ProviderLogo
+                                :provider="row.provider"
+                                class="inline-flex h-3.5 w-3.5 shrink-0 items-center text-gray-500 dark:text-gray-400 [&>svg]:h-full [&>svg]:w-full"
+                                aria-hidden="true"
+                            />
+                            <span class="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-300">{{ row.label }}</span>
+                            <span class="tabular-nums text-gray-900 dark:text-white">{{ formatNumber(row.count) }}</span>
+                            <span class="w-12 text-right tabular-nums text-xs text-gray-500 dark:text-gray-400">{{ row.share.toFixed(1) }}%</span>
+                        </li>
+                    </ul>
                 </div>
             </div>
         </div>
 
         <!-- Tables -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <!-- Top Models -->
             <div class="card">
                 <div class="card-header">
@@ -616,7 +626,7 @@ onUnmounted(() => {
             @click="closeLatencyBreakdown"
         >
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden" @click.stop>
-                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-4">
+                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-start justify-between gap-4">
                     <div>
                         <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Average Latency by Model Type</h3>
                         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ periodLabel }}</p>
@@ -666,7 +676,7 @@ onUnmounted(() => {
             @click="closeAllModels"
         >
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden" @click.stop>
-                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800">
                     <div class="flex items-start justify-between gap-4">
                         <div>
                             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">All Models</h3>
@@ -735,7 +745,7 @@ onUnmounted(() => {
                     </table>
                 </div>
 
-                <div v-if="modelsTotalPages > 1" class="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <div v-if="modelsTotalPages > 1" class="px-5 py-3 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
                     <span class="text-sm text-gray-500 dark:text-gray-400">
                         Page {{ modelsPage }} of {{ modelsTotalPages }}
                     </span>

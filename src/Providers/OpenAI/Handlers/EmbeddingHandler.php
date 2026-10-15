@@ -13,6 +13,9 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 
+/**
+ * Embeddings (`/v1/embeddings`), billed on input tokens only.
+ */
 class EmbeddingHandler implements ExtractsModelFromResponse, Handler, MatchesResponseShape
 {
     use ExtractsModelField;

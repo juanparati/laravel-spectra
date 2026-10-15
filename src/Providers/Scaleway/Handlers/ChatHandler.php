@@ -4,45 +4,63 @@ declare(strict_types=1);
 
 namespace Spectra\Providers\Scaleway\Handlers;
 
-use Spectra\Concerns\ExtractsModelField;
 use Spectra\Concerns\MatchesParametricEndpoints;
-use Spectra\Contracts\ExtractsModelFromResponse;
-use Spectra\Contracts\Handler;
-use Spectra\Contracts\HasFinishReason;
-use Spectra\Contracts\MatchesResponseShape;
-use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
-use Spectra\Enums\ModelType;
+use Spectra\Providers\Concerns\OpenAiCompatibleChatHandler;
+use Spectra\Providers\Scaleway\Streaming\ScalewayStreaming;
+use Spectra\Support\Tracking\StreamHandler;
 
-class ChatHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, MatchesResponseShape
+/**
+ * Scaleway Generative APIs chat: `chat/completions` and `responses`, streamed
+ * or not.
+ *
+ * Both are served at `/v1/...` (default project) and
+ * `/{project_id}/v1/...`. Chat usage is OpenAI-shaped; Responses usage uses
+ * `input_tokens` / `output_tokens` with `input_tokens_details` and
+ * `output_tokens_details`.
+ */
+class ChatHandler extends OpenAiCompatibleChatHandler
 {
-    use ExtractsModelField;
     use MatchesParametricEndpoints;
-
-    public function modelType(): ModelType
-    {
-        return ModelType::Text;
-    }
 
     public function endpoints(): array
     {
         return [
+            '/v1/chat/completions',
             '/{project_id}/v1/chat/completions',
+            '/v1/responses',
             '/{project_id}/v1/responses',
         ];
     }
 
     /**
-     * @param  array<string, mixed>  $requestData
-     * @param  array<string, mixed>  $responseData
+     * Streamed Responses events carry usage under `response.usage`.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>|null
      */
-    public function extractMetrics(array $requestData, array $responseData): Metrics
+    public function usageFrom(array $data): ?array
     {
-        return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: (int) ($responseData['usage']['prompt_tokens'] ?? $responseData['usage']['input_tokens'] ?? 0),
-                completionTokens: (int) ($responseData['usage']['completion_tokens'] ?? $responseData['usage']['output_tokens'] ?? 0),
-            ),
+        $usage = $data['usage'] ?? $data['response']['usage'] ?? null;
+
+        return is_array($usage) ? $usage : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $usage
+     */
+    public function tokensFromUsage(array $usage): TokenMetrics
+    {
+        if (! isset($usage['input_tokens']) && ! isset($usage['output_tokens'])) {
+            return parent::tokensFromUsage($usage);
+        }
+
+        // Responses API usage.
+        return new TokenMetrics(
+            promptTokens: (int) ($usage['input_tokens'] ?? 0),
+            completionTokens: (int) ($usage['output_tokens'] ?? 0),
+            cachedTokens: (int) ($usage['input_tokens_details']['cached_tokens'] ?? 0),
+            reasoningTokens: (int) ($usage['output_tokens_details']['reasoning_tokens'] ?? 0),
         );
     }
 
@@ -95,8 +113,11 @@ class ChatHandler implements ExtractsModelFromResponse, Handler, HasFinishReason
     /** @param  array<string, mixed>  $data */
     public function matchesResponse(array $data): bool
     {
-        $object = $data['object'] ?? null;
+        return in_array($data['object'] ?? null, ['chat.completion', 'response'], true);
+    }
 
-        return in_array($object, ['chat.completion', 'response'], true);
+    public function streamingHandler(): StreamHandler
+    {
+        return new ScalewayStreaming($this);
     }
 }

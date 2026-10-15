@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Carbon;
 use Spectra\Contracts\HasExpiration;
+use Spectra\Contracts\HasProviderLatency;
 use Spectra\Contracts\SkipsResponse;
 use Spectra\Data\Metrics;
 use Spectra\Data\VideoMetrics;
@@ -147,4 +148,30 @@ it('returns null expires_at when not present', function () {
 
     expect($handler->extractExpiresAt([]))->toBeNull()
         ->and($handler->extractExpiresAt(['status' => 'completed']))->toBeNull();
+});
+
+it('video handler implements HasProviderLatency', function () {
+    expect(new VideoHandler)->toBeInstanceOf(HasProviderLatency::class);
+});
+
+it('measures generation time from the job timestamps', function () {
+    $response = json_decode(file_get_contents(__DIR__.'/../../responses/openai/video_completed.json'), true);
+
+    // completed_at 1770492874 - created_at 1770492811 = 63 s
+    expect((new VideoHandler)->extractProviderLatency($response))->toBe(63_000);
+});
+
+it('measures generation time from ISO-8601 timestamps', function () {
+    $latency = (new VideoHandler)->extractProviderLatency([
+        'created_at' => '2026-09-01T10:00:00.250Z',
+        'completed_at' => '2026-09-01T10:01:30.750Z',
+    ]);
+
+    expect($latency)->toBe(90_500);
+});
+
+it('returns no generation time for an unfinished video', function () {
+    $response = json_decode(file_get_contents(__DIR__.'/../../responses/openai/video_queued.json'), true);
+
+    expect((new VideoHandler)->extractProviderLatency($response))->toBeNull();
 });

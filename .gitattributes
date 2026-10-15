@@ -1,6 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Provider stream fixtures keep their exact line endings (Gemini SSE uses CRLF)
+/tests/responses/**/*.sse -text
+/tests/responses/google/streams/* -text
+
 # Distribution archive exclusions
 /.github            export-ignore
 /art                export-ignore

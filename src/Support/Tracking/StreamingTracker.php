@@ -6,24 +6,56 @@ namespace Spectra\Support\Tracking;
 
 use Generator;
 use Spectra\Contracts\StreamsResponse;
-use Spectra\Facades\Spectra;
+use Spectra\Data\TokenMetrics;
 use Spectra\Models\SpectraRequest;
 use Spectra\Spectra as SpectraManager;
 use Spectra\Support\ProviderRegistry;
 use Throwable;
 
 /**
- * Helper for tracking streaming AI responses.
+ * Accumulates a streamed AI response and records it once the stream ends.
  *
- * Usage:
- *   $tracker = Spectra::stream();
- *   foreach ($tracker->track($stream) as $chunk) {
- *       echo $chunk; // Process each text chunk
- *   }
- *   $result = $tracker->finish(); // Returns SpectraRequest
+ * Two ways in:
+ *
+ * - Automatic: the Guzzle / HTTP-client middleware wraps the response body in
+ *   a TrackedStream, which feeds every event here via ingest() and calls
+ *   finish() at the end of the body. No user code is needed.
+ * - Manual, for SDKs that don't go through Spectra's middleware:
+ *
+ *     $tracker = Spectra::stream();
+ *     foreach ($tracker->track($stream) as $chunk) {
+ *         echo $chunk;
+ *     }
+ *     $result = $tracker->finish();
+ *
+ * When both happen for the same request (the middleware saw it and the user
+ * also wrapped it), the manual tracker claims the request and the automatic
+ * one stays silent, so it is recorded once.
  */
 class StreamingTracker
 {
+    /**
+     * Responses API output item types worth keeping the full response for
+     * (media storage, tool-call counting).
+     */
+    protected const CAPTURE_OUTPUT_TYPES = [
+        'image_generation_call',
+        'web_search_call',
+        'file_search_call',
+        'code_interpreter_call',
+        'computer_call',
+        'mcp_call',
+        'local_shell_call',
+        'shell_call',
+        'apply_patch_call',
+        'custom_tool_call',
+        'tool_search_call',
+        'x_search_call',
+    ];
+
+    /** Responses API events that carry the final response object. */
+    protected const TERMINAL_RESPONSE_EVENTS = ['response.completed', 'response.incomplete', 'response.failed'];
+
     protected ?RequestContext $context = null;
 
     protected ?StreamHandler $streamHandler = null;
@@ -34,7 +66,7 @@ class StreamingTracker
 
     protected string $content = '';
 
-    /** @var array<string, int> */
+    /** @var array<string, mixed> */
     protected array $usage = [];
 
     protected ?string $finishReason = null;
@@ -44,6 +76,9 @@ class StreamingTracker
     protected ?string $model = null;
 
     protected ?Throwable $error = null;
+
+    /** Error message sent inside the stream (e.g. an Anthropic `error` event). */
+    protected ?string $streamError = null;
 
     /** @var array<string, mixed> */
     protected array $completedResponse = [];
@@ -56,6 +91,8 @@ class StreamingTracker
     /** Whether any stream chunk, manual content, or manual usage was recorded. */
     protected bool $sawStreamData = false;
 
+    protected ?SpectraRequest $result = null;
+
     /** @var array<string, string> */
     protected static array $streamClassMap = [
         'OpenAI\Responses\StreamResponse' => 'openai',
@@ -64,8 +101,7 @@ class StreamingTracker
 
     /**
      * Provider and model are optional - they will be auto-detected from the stream.
-     */
-    /**
+     *
      * @param  array<string, mixed>  $options
      */
     public function __construct(
@@ -76,22 +112,40 @@ class StreamingTracker
         $this->startTime = microtime(true);
     }
 
+    /**
+     * A tracker bound to a request context the middleware already started.
+     */
+    public static function forContext(RequestContext $context): self
+    {
+        $tracker = new self($context->provider, $context->model);
+        $tracker->context = $context;
+        $tracker->startTime = (float) $context->getStartedAt()->format('U.u');
+        $tracker->contextInitialized = true;
+        $context->isStreaming = true;
+        $tracker->resolveStreamHandler();
+
+        return $tracker;
+    }
+
     protected function initializeContext(): void
     {
         if ($this->contextInitialized) {
             return;
         }
 
-        // Reuse context from GuzzleMiddleware if available (has endpoint, request data, pricing tier, etc.)
+        // Reuse the context the middleware started (endpoint, request data,
+        // pricing tier, ...) and take over recording it.
         $pending = app(SpectraManager::class)->consumePendingStreamContext();
 
         if ($pending !== null) {
-            $this->context = $pending;
+            $pending->streamClaimed = true;
+            $context = $pending;
             $this->startTime = (float) $pending->getStartedAt()->format('U.u');
             $this->provider = $this->provider ?? $pending->provider;
             $this->requestedModel = $this->requestedModel ?? $pending->model;
+            $this->applyOptions($pending);
         } else {
-            $this->context = Spectra::startRequest(
+            $context = app(SpectraManager::class)->startRequest(
                 $this->provider ?? 'unknown',
                 $this->requestedModel ?? 'unknown',
                 array_merge(
@@ -101,7 +155,8 @@ class StreamingTracker
             );
         }
 
-        $this->context->isStreaming = true;
+        $this->context = $context;
+        $context->isStreaming = true;
         $this->resolveStreamHandler();
         $this->contextInitialized = true;
     }
@@ -110,8 +165,8 @@ class StreamingTracker
      * Resolve the streaming handler from the provider registry.
      *
      * First tries endpoint-based resolution. If no endpoint is available
-     * (e.g. standalone Spectra::stream() without GuzzleMiddleware), falls
-     * back to the first handler that implements StreamsResponse.
+     * (e.g. standalone Spectra::stream() without middleware), falls back to
+     * the first handler that implements StreamsResponse.
      */
     protected function resolveStreamHandler(): void
     {
@@ -127,7 +182,6 @@ class StreamingTracker
 
         $endpoint = $this->context->endpoint ?? '';
 
-        // Try endpoint-based resolution first
         if ($endpoint !== '') {
             $handler = $provider->resolveHandler($endpoint);
 
@@ -140,10 +194,8 @@ class StreamingTracker
             }
         }
 
-        // Fallback: find the first handler that supports streaming.
-        // Don't set modelType here — the fallback handler may not match the
-        // actual response type (e.g. text handler picked for image stream).
-        // ResponseProcessor will resolve it from the full response later.
+        // Fallback: the first handler that supports streaming. The model type
+        // is resolved later from the response, since this guess may be wrong.
         foreach ($provider->handlers() as $handler) {
             if ($handler instanceof StreamsResponse) {
                 $this->streamHandler = $handler->streamingHandler();
@@ -154,25 +206,25 @@ class StreamingTracker
     }
 
     /**
-     * @param  iterable<mixed>  $stream
+     * Wrap a stream (an SDK stream object, any iterable of chunks, or the raw
+     * text of a server-sent-events body) and yield its text as it arrives.
+     *
+     * @param  iterable<mixed>|string  $stream
      * @return Generator<string>
      */
-    public function track(iterable $stream): Generator
+    public function track(iterable|string $stream): Generator
     {
         if ($this->provider === null) {
             $this->provider = $this->detectProvider($stream);
         }
 
+        if (is_string($stream)) {
+            $stream = $this->parseRawStream($stream);
+        }
+
         try {
             foreach ($stream as $chunk) {
-                // Delay context init to first chunk so we can detect the model
-                if (! $this->contextInitialized) {
-                    $this->detectModelFromChunk($chunk);
-                    $this->initializeContext();
-                }
-
-                $this->sawStreamData = true;
-                $text = $this->processChunk($chunk);
+                $text = $this->ingest($chunk);
 
                 if ($text !== null && $text !== '') {
                     yield $text;
@@ -181,13 +233,14 @@ class StreamingTracker
         } catch (Throwable $e) {
             $this->error = $e;
 
-            // If the stream died before its context was claimed, discard the
-            // pending context from GuzzleMiddleware — otherwise the next
-            // stream in this request would silently inherit it.
+            // If the stream died before its context was claimed, take the
+            // pending middleware context with us — otherwise the next stream
+            // in this process would silently inherit it.
             if (! $this->contextInitialized) {
                 $pending = app(SpectraManager::class)->consumePendingStreamContext();
 
                 if ($pending !== null) {
+                    $pending->streamClaimed = true;
                     $this->context = $pending;
                     $this->contextInitialized = true;
                 }
@@ -195,6 +248,34 @@ class StreamingTracker
 
             throw $e;
         }
+    }
+
+    /**
+     * Process one stream chunk (an SDK chunk object or a decoded event) and
+     * return its text, if any.
+     */
+    public function ingest(mixed $chunk): ?string
+    {
+        // Delay context init to the first chunk so the model can be detected.
+        if (! $this->contextInitialized) {
+            $this->detectModelFromChunk($chunk);
+            $this->initializeContext();
+        }
+
+        $this->sawStreamData = true;
+
+        return $this->processChunk($chunk);
+    }
+
+    /**
+     * @return Generator<array<string, mixed>>
+     */
+    protected function parseRawStream(string $body): Generator
+    {
+        $parser = new StreamEventParser;
+
+        yield from $parser->push($body);
+        yield from $parser->finish();
     }
 
     protected function detectProvider(mixed $stream): string
@@ -237,22 +318,10 @@ class StreamingTracker
         $data = $this->normalizeChunk($chunk);
 
         // Generic detection — covers OpenAI (model), Anthropic (message.model), Google (modelVersion)
-        if (isset($data['model'])) {
-            $this->requestedModel = $data['model'];
+        $model = $data['model'] ?? $data['message']['model'] ?? $data['response']['model'] ?? $data['modelVersion'] ?? null;
 
-            return;
-        }
-
-        if (isset($data['message']['model'])) {
-            $this->requestedModel = $data['message']['model'];
-
-            return;
-        }
-
-        if (isset($data['modelVersion'])) {
-            $this->requestedModel = $data['modelVersion'];
-
-            return;
+        if (is_string($model)) {
+            $this->requestedModel = $model;
         }
     }
 
@@ -260,6 +329,8 @@ class StreamingTracker
     {
         $data = $this->normalizeChunk($chunk);
         $this->lastChunkData = $data;
+
+        $this->captureStreamError($data);
 
         $text = $this->extractText($data);
 
@@ -296,13 +367,17 @@ class StreamingTracker
             return [];
         }
 
+        if (! is_array($data)) {
+            return [];
+        }
+
         // OpenAI PHP SDK toArray() returns ['event' => '...', 'data' => [...]]
         // but our extraction methods expect the raw SSE format: ['type' => '...', ...]
         if (isset($data['event']) && is_string($data['event']) && isset($data['data']) && is_array($data['data'])) {
             $type = $data['event'];
 
-            // response.completed nests the full response under 'response' in raw SSE
-            if ($type === 'response.completed') {
+            // Terminal events nest the full response under 'response' in raw SSE
+            if (in_array($type, self::TERMINAL_RESPONSE_EVENTS, true)) {
                 return ['type' => $type, 'response' => $data['data']];
             }
 
@@ -316,26 +391,43 @@ class StreamingTracker
     /**
      * @param  array<string, mixed>  $data
      */
-    protected function captureCompletedResponse(array $data): void
+    protected function captureStreamError(array $data): void
     {
-        if (($data['type'] ?? null) !== 'response.completed' || ! isset($data['response']['output'])) {
+        $type = $data['type'] ?? null;
+
+        // OpenAI Responses: the final event of a failed response; its usage still counts.
+        if ($type === 'response.failed') {
+            $message = $data['response']['error']['message'] ?? null;
+            $this->streamError = is_string($message) && $message !== '' ? $message : 'Response failed';
+
             return;
         }
 
-        // Capture the full response when it contains output items that need
-        // special processing (media storage, tool call counting, etc.)
-        $captureTypes = [
-            'image_generation_call',
-            'web_search_call',
-            'file_search_call',
-            'code_interpreter_call',
-            'computer_call',
-            'mcp_tool_call',
-            'local_shell_call',
-        ];
+        if ($type !== 'error') {
+            return;
+        }
+
+        // Anthropic nests the error ({type: error, error: {...}}); OpenAI puts
+        // message and code at the top level.
+        $error = $data['error'] ?? $data;
+
+        $this->streamError = is_array($error)
+            ? (string) ($error['message'] ?? $error['code'] ?? $error['type'] ?? json_encode($error))
+            : (string) $error;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    protected function captureCompletedResponse(array $data): void
+    {
+        if (! in_array($data['type'] ?? null, self::TERMINAL_RESPONSE_EVENTS, true)
+            || ! is_array($data['response']['output'] ?? null)) {
+            return;
+        }
 
         foreach ($data['response']['output'] as $item) {
-            if (in_array($item['type'] ?? null, $captureTypes, true)) {
+            if (in_array($item['type'] ?? null, self::CAPTURE_OUTPUT_TYPES, true)) {
                 $this->completedResponse = $data['response'];
 
                 return;
@@ -360,28 +452,24 @@ class StreamingTracker
      */
     protected function extractGenericText(array $data): ?string
     {
-        return $data['choices'][0]['delta']['content']
+        $text = $data['choices'][0]['delta']['content']
             ?? $data['delta']['text']
             ?? $data['text']
             ?? $data['content']
             ?? null;
+
+        return is_string($text) ? $text : null;
     }
 
     /**
      * Usage data typically arrives in the final chunk of the stream.
-     */
-    /**
+     *
      * @param  array<string, mixed>  $data
      */
     protected function extractUsage(array $data): void
     {
         if (empty($this->usage)) {
-            $this->usage = [
-                'prompt_tokens' => 0,
-                'completion_tokens' => 0,
-                'cached_tokens' => 0,
-                'reasoning_tokens' => 0,
-            ];
+            $this->usage = (new TokenMetrics)->toUsageArray();
         }
 
         if ($this->streamHandler !== null) {
@@ -390,10 +478,11 @@ class StreamingTracker
             return;
         }
 
-        // Generic fallback: standard usage object
-        if (isset($data['usage'])) {
-            $usage = $data['usage'];
-            $this->usage = [
+        // Generic fallback: standard usage object (also Groq's x_groq.usage)
+        $usage = $data['usage'] ?? $data['x_groq']['usage'] ?? null;
+
+        if (is_array($usage)) {
+            $this->usage = array_merge($this->usage, [
                 'prompt_tokens' => $usage['prompt_tokens'] ?? $usage['input_tokens'] ?? 0,
                 'completion_tokens' => $usage['completion_tokens'] ?? $usage['output_tokens'] ?? 0,
                 'cached_tokens' => $usage['prompt_tokens_details']['cached_tokens']
@@ -402,7 +491,7 @@ class StreamingTracker
                 'reasoning_tokens' => $usage['completion_tokens_details']['reasoning_tokens']
                     ?? $usage['output_tokens_details']['reasoning_tokens']
                     ?? 0,
-            ];
+            ]);
         }
     }
 
@@ -444,17 +533,41 @@ class StreamingTracker
         }
 
         // Generic fallback
-        if (isset($data['model']) && $this->model === null) {
+        if (isset($data['model']) && is_string($data['model']) && $this->model === null) {
             $this->model = $data['model'];
         }
 
         if ($this->responseId === null) {
-            $this->responseId = $data['id'] ?? $data['responseId'] ?? null;
+            $id = $data['id'] ?? $data['responseId'] ?? null;
+            $this->responseId = is_string($id) ? $id : null;
         }
     }
 
+    /**
+     * Record the stream. Safe to call more than once; later calls return the
+     * first result.
+     */
     public function finish(): SpectraRequest
     {
+        if ($this->result !== null) {
+            return $this->result;
+        }
+
+        return $this->result = $this->record();
+    }
+
+    /**
+     * Whether finish() has already recorded this stream.
+     */
+    public function isFinished(): bool
+    {
+        return $this->result !== null;
+    }
+
+    protected function record(): SpectraRequest
+    {
+        $manager = app(SpectraManager::class);
+
         // Nothing streamed, nothing set manually, no error: skip recording
         // instead of persisting an all-zero request row.
         if (! $this->contextInitialized
@@ -464,7 +577,7 @@ class StreamingTracker
             && empty($this->usage)
             && empty($this->completedResponse)
         ) {
-            app(SpectraManager::class)->consumePendingStreamContext();
+            $manager->consumePendingStreamContext();
 
             return new SpectraRequest;
         }
@@ -474,60 +587,80 @@ class StreamingTracker
         }
 
         assert($this->context !== null);
+        $context = $this->context;
+
+        $manager->clearPendingStreamContext($context);
 
         // Apply TTFT if it was captured before context was initialized (appendContent path)
-        if ($this->firstTokenTime !== null && $this->context->timeToFirstTokenMs === null) {
+        if ($this->firstTokenTime !== null && $context->timeToFirstTokenMs === null) {
             $ttft = (int) (($this->firstTokenTime - $this->startTime) * 1000);
-            $this->context->setTimeToFirstToken($ttft);
-        }
-
-        if ($this->error !== null) {
-            return Spectra::recordFailure($this->context, $this->error);
+            $context->setTimeToFirstToken($ttft);
         }
 
         // Snapshot is the actual versioned model from the API; context->model is the user's requested model
         if ($this->model !== null) {
-            $this->context->snapshot = $this->model;
+            $context->snapshot = $this->model;
         }
 
         if ($this->responseId !== null) {
-            $this->context->responseId = $this->responseId;
+            $context->responseId = $this->responseId;
+        }
+
+        $this->applyStreamExtras();
+
+        // The tier the request asked for, when the stream didn't report one.
+        if ($context->pricingTier === null && $context->requestedPricingTier !== null) {
+            $context->withPricingTier($context->requestedPricingTier);
+        }
+
+        $context->finishReason = $this->finishReason ?? $context->finishReason;
+
+        if ($this->error !== null) {
+            $context->setUsage($this->usage);
+
+            return $manager->recordFailure($context, $this->error);
+        }
+
+        if ($this->streamError !== null) {
+            $context->setUsage($this->usage);
+
+            return $manager->recordFailure($context, new StreamErrorException($this->streamError));
         }
 
         // When the stream contained a completed response (e.g. image generation),
         // delegate to ResponseProcessor to get metrics, media storage, model type, etc.
         if (! empty($this->completedResponse)) {
-            $result = app(ResponseProcessor::class)->process($this->context, $this->completedResponse);
+            $result = app(ResponseProcessor::class)->process($context, $this->completedResponse);
 
             if ($result !== null) {
                 [$responseBody, $usage] = $result;
                 $responseBody['streaming'] = true;
 
-                return Spectra::recordSuccess($this->context, $responseBody, $usage ?? []);
+                return $manager->recordSuccess($context, $responseBody, $usage ?? []);
             }
         }
 
-        $this->context->finishReason = $this->finishReason;
-        $this->context->reasoningTokens = $this->usage['reasoning_tokens'] ?? 0;
+        $context->finishReason = $this->finishReason;
+        $context->reasoningTokens = $this->usage['reasoning_tokens'] ?? 0;
 
         // Detect tool calls from finish_reason
         if ($this->finishReason !== null && in_array($this->finishReason, ['tool_calls', 'tool_use'], true)) {
-            $this->context->hasToolCalls = true;
+            $context->hasToolCalls = true;
         }
 
         // Resolve model_type if it wasn't set during handler resolution
         // (happens when no endpoint is available, e.g. standalone Spectra::stream())
-        if ($this->context->modelType === null && $this->provider !== null) {
+        if ($context->modelType === null && $this->provider !== null) {
             $providerInstance = app(ProviderRegistry::class)->provider($this->provider);
-            $endpoint = $this->context->endpoint ?? '';
+            $endpoint = $context->endpoint ?? '';
 
             if ($providerInstance !== null) {
                 $handler = $providerInstance->resolveHandler($endpoint, $this->lastChunkData);
 
                 if ($handler !== null) {
-                    $this->context->modelType = $handler->modelType()->value;
+                    $context->modelType = $handler->modelType()->value;
                 } elseif ($endpoint !== '') {
-                    $this->context->modelType = $providerInstance->resolveModelType($endpoint)?->value;
+                    $context->modelType = $providerInstance->resolveModelType($endpoint)?->value;
                 }
             }
         }
@@ -540,7 +673,77 @@ class StreamingTracker
             'streaming' => true,
         ];
 
-        return Spectra::recordSuccess($this->context, $response, $this->usage);
+        return $manager->recordSuccess($context, $response, $this->usage);
+    }
+
+    /**
+     * Apply the options given to Spectra::stream() to a context the
+     * middleware started, so its tags, metadata, trackable and tier are kept.
+     */
+    protected function applyOptions(RequestContext $context): void
+    {
+        $options = $this->options;
+
+        if (! empty($options['tags']) && is_array($options['tags'])) {
+            $context->tags = array_values(array_unique([...$context->tags, ...$options['tags']]));
+        }
+
+        if (! empty($options['metadata']) && is_array($options['metadata'])) {
+            $context->metadata = array_merge($context->metadata, $options['metadata']);
+        }
+
+        if (isset($options['trackable_type'], $options['trackable_id'])) {
+            $context->trackableType = (string) $options['trackable_type'];
+            $context->trackableId = $options['trackable_id'];
+        }
+
+        if (isset($options['pricing_tier']) && is_string($options['pricing_tier'])) {
+            $context->withPricingTier($options['pricing_tier']);
+        }
+
+        if (isset($options['conversation_id']) && is_string($options['conversation_id'])) {
+            $context->inConversation($options['conversation_id'], isset($options['conversation_turn']) ? (int) $options['conversation_turn'] : null);
+        }
+    }
+
+    /**
+     * Apply the reserved keys a StreamHandler may add to the usage array
+     * (see StreamHandler::usage()).
+     */
+    protected function applyStreamExtras(): void
+    {
+        if ($this->context === null) {
+            return;
+        }
+
+        $usage = $this->usage;
+
+        if (isset($usage['reported_cost_in_cents']) && is_numeric($usage['reported_cost_in_cents'])) {
+            $this->context->reportedCostInCents = (float) $usage['reported_cost_in_cents'];
+        }
+
+        if (isset($usage['cost_multiplier']) && is_numeric($usage['cost_multiplier'])) {
+            $this->context->costMultiplier = (float) $usage['cost_multiplier'];
+        }
+
+        if (isset($usage['pricing_tier']) && is_string($usage['pricing_tier']) && $this->context->pricingTier === null) {
+            $this->context->withPricingTier($usage['pricing_tier']);
+        }
+
+        if (isset($usage['tool_calls']) && is_array($usage['tool_calls'])) {
+            $counts = $this->context->toolCallCounts ?? [];
+
+            foreach ($usage['tool_calls'] as $type => $count) {
+                if (is_string($type) && is_numeric($count) && $count > 0) {
+                    $counts[$type] = max($counts[$type] ?? 0, (int) $count);
+                }
+            }
+
+            if ($counts !== []) {
+                $this->context->toolCallCounts = $counts;
+                $this->context->hasToolCalls = true;
+            }
+        }
     }
 
     public function getContent(): string
@@ -549,7 +752,7 @@ class StreamingTracker
     }
 
     /**
-     * @return array<string, int>
+     * @return array<string, mixed>
      */
     public function getUsage(): array
     {
@@ -578,18 +781,15 @@ class StreamingTracker
 
     /**
      * Manually set usage (useful when usage comes from a separate source).
-     */
-    /**
+     *
+     * Accepts the TokenMetrics usage keys (prompt_tokens, completion_tokens,
+     * cached_tokens, cache_write_tokens, reasoning_tokens, ...).
+     *
      * @param  array<string, int>  $usage
      */
     public function setUsage(array $usage): self
     {
-        $this->usage = [
-            'prompt_tokens' => $usage['prompt_tokens'] ?? $usage['input_tokens'] ?? 0,
-            'completion_tokens' => $usage['completion_tokens'] ?? $usage['output_tokens'] ?? 0,
-            'cached_tokens' => $usage['cached_tokens'] ?? 0,
-            'reasoning_tokens' => $usage['reasoning_tokens'] ?? 0,
-        ];
+        $this->usage = TokenMetrics::fromArray($usage)->toUsageArray();
 
         return $this;
     }

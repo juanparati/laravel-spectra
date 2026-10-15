@@ -11,8 +11,8 @@ use Spectra\Support\ProviderRegistry;
 /**
  * Decides whether a PSR-7 response should be treated as a streaming response.
  *
- * Shared by every tracking entry point (Guzzle middleware, Http macro) so the
- * detection heuristics cannot drift between them.
+ * Used by GuzzleMiddleware, the single tracking entry point, so every route
+ * (HTTP client, openai-php, custom Guzzle stacks) detects streams the same way.
  */
 class StreamDetector
 {
@@ -33,25 +33,35 @@ class StreamDetector
             }
         }
 
+        $contentType = $response->getHeaderLine('Content-Type');
+
+        // Server-sent events, or newline-delimited JSON (Ollama streams by default).
+        if (str_contains($contentType, 'text/event-stream')
+            || str_contains($contentType, 'ndjson')
+            || str_contains($contentType, 'jsonl')) {
+            return true;
+        }
+
+        // Gemini streams via the endpoint name; without `alt=sse` the body is a
+        // streamed JSON array served as application/json.
+        if ($endpoint !== null && str_ends_with($endpoint, ':streamGenerateContent')) {
+            return true;
+        }
+
+        // A plain JSON document is never a stream, even when the request asked
+        // for one (some APIs ignore or deprecated their `stream` flag).
+        if (str_contains($contentType, 'application/json')) {
+            return false;
+        }
+
         // The request explicitly asked for streaming.
         if (! empty($requestData['stream'])) {
             return true;
         }
 
-        $contentType = $response->getHeaderLine('Content-Type');
-
-        if (str_contains($contentType, 'text/event-stream')) {
-            return true;
-        }
-
         // Chunked without content-length and not JSON indicates streaming.
         $transferEncoding = $response->getHeaderLine('Transfer-Encoding');
-        if (str_contains($transferEncoding, 'chunked') && ! $response->hasHeader('Content-Length')) {
-            if (! str_contains($contentType, 'application/json')) {
-                return true;
-            }
-        }
 
-        return false;
+        return str_contains($transferEncoding, 'chunked') && ! $response->hasHeader('Content-Length');
     }
 }

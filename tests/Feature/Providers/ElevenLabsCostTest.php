@@ -19,9 +19,9 @@ it('records elevenlabs tts with per-character cost', function () {
 
     $record = SpectraRequest::latest()->first();
 
-    // eleven_multilingual_v2: 10000 cents per 1M chars × 1000 chars = 10 cents
+    // eleven_multilingual_v2: 8000 cents per 1M chars ($0.08 / 1K) × 1000 chars = 8 cents
     expect($record)->not->toBeNull()
         ->and($record->provider)->toBe('elevenlabs')
         ->and($record->input_characters)->toBe(1000)
-        ->and((float) $record->total_cost_in_cents)->toEqualWithDelta(10.0, 0.001);
+        ->and((float) $record->total_cost_in_cents)->toEqualWithDelta(8.0, 0.000001);
 });

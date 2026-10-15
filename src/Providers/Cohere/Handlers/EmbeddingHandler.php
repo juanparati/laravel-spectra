@@ -13,6 +13,14 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 
+/**
+ * Cohere Embed (`/v2/embed`, `/v1/embed`), billed per input token.
+ *
+ * Image inputs (Embed v4 and newer) are billed as `billed_units.image_tokens`,
+ * separate from the text `input_tokens`. They are counted as image input
+ * tokens; no separate image price is published, so they bill at the model's
+ * input price.
+ */
 class EmbeddingHandler implements ExtractsModelFromResponse, Handler, MatchesResponseShape
 {
     use ExtractsModelField;
@@ -42,10 +50,13 @@ class EmbeddingHandler implements ExtractsModelFromResponse, Handler, MatchesRes
             ?? $responseData['usage']['billed_units']
             ?? [];
 
+        $imageTokens = (int) ($billed['image_tokens'] ?? 0);
+
         return new Metrics(
             tokens: new TokenMetrics(
-                promptTokens: (int) ($billed['input_tokens'] ?? 0),
+                promptTokens: (int) ($billed['input_tokens'] ?? 0) + $imageTokens,
                 completionTokens: 0,
+                imageInputTokens: $imageTokens,
             ),
         );
     }

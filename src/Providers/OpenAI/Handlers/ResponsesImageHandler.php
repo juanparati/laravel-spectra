@@ -15,8 +15,16 @@ use Spectra\Data\ImageMetrics;
 use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\OpenAI\OpenAiUsage;
 use Spectra\Support\MediaPersister;
 
+/**
+ * Responses API answers that used the `image_generation` tool.
+ *
+ * The response `usage` is the mainline model's (e.g. gpt-5.4) token usage,
+ * so it is priced as that model; the response does not report the image
+ * model's own token usage.
+ */
 class ResponsesImageHandler implements ExtractsModelFromResponse, Handler, HasFinishReason, HasMedia, MatchesResponseShape
 {
     use ExtractsModelField;
@@ -48,12 +56,10 @@ class ResponsesImageHandler implements ExtractsModelFromResponse, Handler, HasFi
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
+        $usage = $responseData['usage'] ?? null;
+
         return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: (int) ($responseData['usage']['input_tokens'] ?? 0),
-                completionTokens: (int) ($responseData['usage']['output_tokens'] ?? 0),
-                cachedTokens: (int) ($responseData['usage']['input_tokens_details']['cached_tokens'] ?? $responseData['usage']['prompt_tokens_details']['cached_tokens'] ?? 0),
-            ),
+            tokens: is_array($usage) ? OpenAiUsage::fromResponses($usage) : new TokenMetrics,
             image: new ImageMetrics(
                 count: $this->countImageGenerationCalls($responseData),
             ),

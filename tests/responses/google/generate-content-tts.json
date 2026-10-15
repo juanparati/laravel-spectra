@@ -1,0 +1,39 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "inlineData": {
+              "mimeType": "audio/L16;codec=pcm;rate=24000",
+              "data": "AAABAAIAAwAEAAUABgAHAAgACQAKAAsADAANAA4ADwA="
+            }
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 50,
+    "candidatesTokenCount": 250,
+    "totalTokenCount": 300,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 50
+      }
+    ],
+    "candidatesTokensDetails": [
+      {
+        "modality": "AUDIO",
+        "tokenCount": 250
+      }
+    ],
+    "serviceTier": "standard"
+  },
+  "modelVersion": "gemini-3.8-flash-tts",
+  "responseId": "Wn7vaL3rM6yL7M8Ppr6h8QU"
+}

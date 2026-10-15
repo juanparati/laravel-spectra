@@ -1,0 +1,35 @@
+{
+  "id": "resp_bg_7a6b5c4d3e2f1a0b",
+  "object": "response",
+  "created_at": 1792051600,
+  "status": "queued",
+  "background": true,
+  "completed_at": null,
+  "error": null,
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "model": "gpt-5.5-pro",
+  "output": [],
+  "parallel_tool_calls": true,
+  "previous_response_id": null,
+  "reasoning": {
+    "effort": "high",
+    "summary": null
+  },
+  "service_tier": "auto",
+  "store": true,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "text"
+    }
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_p": 1.0,
+  "truncation": "disabled",
+  "usage": null,
+  "user": null,
+  "metadata": {}
+}

@@ -6,6 +6,9 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 use Spectra\Providers\XAi\Handlers\ChatHandler;
+use Spectra\Providers\XAi\Handlers\ImageHandler;
+use Spectra\Providers\XAi\Handlers\ResponsesHandler;
+use Spectra\Providers\XAi\Handlers\VideoHandler;
 use Spectra\Support\ProviderRegistry;
 
 it('returns xai as provider', function () {
@@ -16,8 +19,60 @@ it('returns correct display name', function () {
     expect(app(ProviderRegistry::class)->displayName('xai'))->toBe('xAI');
 });
 
-it('returns correct hosts', function () {
-    expect($this->xAiProvider()->getHosts())->toBe(['api.x.ai']);
+it('returns the global and US regional hosts', function () {
+    expect($this->xAiProvider()->getHosts())->toBe(['api.x.ai', 'us.api.x.ai']);
+});
+
+it('resolves a handler for every documented endpoint', function (string $endpoint, string $handler) {
+    expect($this->xAiProvider()->resolveHandler($endpoint))->toBeInstanceOf($handler);
+})->with([
+    ['/v1/chat/completions', ChatHandler::class],
+    ['/v1/chat/deferred-completion/req-1', ChatHandler::class],
+    ['/v1/responses', ResponsesHandler::class],
+    ['/v1/images/generations', ImageHandler::class],
+    ['/v1/images/edits', ImageHandler::class],
+    ['/v1/images/req-1', ImageHandler::class],
+    ['/v1/videos/generations', VideoHandler::class],
+    ['/v1/videos/edits', VideoHandler::class],
+    ['/v1/videos/extensions', VideoHandler::class],
+    ['/v1/videos/req-1', VideoHandler::class],
+]);
+
+it('takes the response id of a video poll from the path', function () {
+    $provider = $this->xAiProvider();
+
+    expect($provider->extractResponseId(['status' => 'done'], '/v1/videos/req-1'))->toBe('req-1')
+        ->and($provider->extractResponseId(['request_id' => 'req-2'], '/v1/videos/generations'))->toBe('req-2')
+        ->and($provider->extractResponseId([], '/v1/videos/generations'))->toBeNull();
+});
+
+it('reads the served tier from service_tier', function () {
+    $provider = $this->xAiProvider();
+
+    expect($provider->extractPricingTierFromResponse(['service_tier' => 'priority']))->toBe('priority')
+        ->and($provider->extractPricingTierFromResponse(['service_tier' => 'fast']))->toBe('priority')
+        ->and($provider->extractPricingTierFromResponse(['service_tier' => 'default']))->toBe('standard')
+        ->and($provider->extractPricingTierFromResponse([]))->toBeNull()
+        ->and($provider->extractPricingTierFromRequest(['service_tier' => 'priority']))->toBe('priority');
+});
+
+it('adds separately reported reasoning tokens to the completion', function () {
+    $metrics = (new ChatHandler)->extractMetrics([], json_decode(file_get_contents(__DIR__.'/../../responses/xai/chat-reasoning.json'), true));
+
+    expect($metrics->tokens->completionTokens)->toBe(103)
+        ->and($metrics->tokens->reasoningTokens)->toBe(94)
+        ->and($metrics->reportedCostInCents)->toEqualWithDelta(0.02912, 1e-12);
+});
+
+it('maps server-side tool usage to tool pricing keys', function () {
+    $response = json_decode(file_get_contents(__DIR__.'/../../responses/xai/responses-tools.json'), true);
+
+    expect((new ResponsesHandler)->extractMetrics([], $response)->toolCalls)->toBe([
+        'web_search_call' => 2,
+        'x_search_call' => 1,
+        'x_search_post' => 10,
+        'x_search_profile' => 1,
+    ]);
 });
 
 it('resolves chat handler for xai endpoint', function () {

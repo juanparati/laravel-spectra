@@ -1,0 +1,14 @@
+{
+  "data": [
+    {"url": "https://imgen.x.ai/xai-imgen/xai-tmp-imgen-1.jpeg", "mime_type": "image/jpeg"},
+    {"url": "https://imgen.x.ai/xai-imgen/xai-tmp-imgen-2.jpeg", "mime_type": "image/jpeg"}
+  ],
+  "usage": {
+    "cost_in_usd_ticks": 1600000000,
+    "input_tokens": 18,
+    "input_tokens_details": {"cached_tokens": 0, "image_tokens": 0, "text_tokens": 18},
+    "output_tokens": 96,
+    "output_tokens_details": {"image_tokens": 0, "reasoning_tokens": 40, "text_tokens": 56},
+    "total_tokens": 114
+  }
+}

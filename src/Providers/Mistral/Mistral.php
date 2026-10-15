@@ -4,13 +4,23 @@ declare(strict_types=1);
 
 namespace Spectra\Providers\Mistral;
 
+use Spectra\Contracts\ExtractsPricingTierFromRequest;
+use Spectra\Contracts\ExtractsPricingTierFromResponse;
+use Spectra\Enums\PricingTier;
 use Spectra\Providers\Mistral\Handlers\ChatHandler;
 use Spectra\Providers\Mistral\Handlers\EmbeddingHandler;
+use Spectra\Providers\Mistral\Handlers\OcrHandler;
 use Spectra\Providers\Mistral\Handlers\SpeechHandler;
 use Spectra\Providers\Mistral\Handlers\TranscriptionHandler;
 use Spectra\Providers\Provider;
 
-class Mistral extends Provider
+/**
+ * Mistral AI: chat / FIM / agents, embeddings, Voxtral speech, and OCR.
+ *
+ * Chat requests can ask for priority capacity (`service_tier`); the response
+ * reports the tier that served it in `usage.service_tier`.
+ */
+class Mistral extends Provider implements ExtractsPricingTierFromRequest, ExtractsPricingTierFromResponse
 {
     public function getProvider(): string
     {
@@ -29,6 +39,28 @@ class Mistral extends Provider
             app(ChatHandler::class),
             app(TranscriptionHandler::class),
             app(SpeechHandler::class),
+            app(OcrHandler::class),
         ];
+    }
+
+    /** @param  array<string, mixed>  $requestData */
+    public function extractPricingTierFromRequest(array $requestData): ?string
+    {
+        return $this->tier($requestData['service_tier'] ?? null);
+    }
+
+    /** @param  array<string, mixed>  $responseData */
+    public function extractPricingTierFromResponse(array $responseData): ?string
+    {
+        return $this->tier($responseData['usage']['service_tier'] ?? $responseData['service_tier'] ?? null);
+    }
+
+    protected function tier(mixed $serviceTier): ?string
+    {
+        return match ($serviceTier) {
+            'priority' => PricingTier::Priority->value,
+            'standard' => PricingTier::Standard->value,
+            default => null,
+        };
     }
 }

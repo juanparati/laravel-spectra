@@ -12,17 +12,28 @@ use Spectra\Contracts\ExtractsModelFromResponse;
 use Spectra\Contracts\Handler;
 use Spectra\Contracts\HasExpiration;
 use Spectra\Contracts\HasMedia;
+use Spectra\Contracts\HasProviderLatency;
 use Spectra\Contracts\SkipsResponse;
 use Spectra\Data\Metrics;
 use Spectra\Data\VideoMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\OpenAI\MeasuresJobLatency;
 use Spectra\Support\ApiKeyResolver;
 use Spectra\Support\MediaPersister;
 
-class VideoHandler implements ExtractsModelFromResponse, Handler, HasExpiration, HasMedia, SkipsResponse
+/**
+ * Sora video generation (`/v1/videos`), billed per second of video.
+ *
+ * OpenAI shut the Videos API down on 2026-09-24; the handler stays so
+ * existing integrations and history keep working. Jobs are polled: only the
+ * completed job is recorded, under the video id, with the job's own
+ * generation time as latency.
+ */
+class VideoHandler implements ExtractsModelFromResponse, Handler, HasExpiration, HasMedia, HasProviderLatency, SkipsResponse
 {
     use ExtractsModelField;
     use MatchesParametricEndpoints;
+    use MeasuresJobLatency;
 
     public function modelType(): ModelType
     {

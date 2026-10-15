@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Spectra\Providers\Google;
 
+/**
+ * Gemini puts the model in the URL (`/v1beta/models/{model}:generateContent`),
+ * not in the request body.
+ */
 trait ExtractsModelFromGoogleEndpoint
 {
     /** @param  array<string, mixed>  $requestData */

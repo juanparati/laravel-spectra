@@ -4,8 +4,16 @@ declare(strict_types=1);
 
 namespace Spectra\Providers\Google\Streaming;
 
+use Spectra\Providers\Google\GeminiUsage;
 use Spectra\Support\Tracking\StreamHandler;
 
+/**
+ * Reads a streamed Gemini response: `:streamGenerateContent?alt=sse` events
+ * or the elements of the streamed JSON array sent without `alt=sse`.
+ *
+ * Every chunk's `usageMetadata` is cumulative, so the latest one replaces
+ * what came before.
+ */
 class GenerateContentStreaming extends StreamHandler
 {
     /**
@@ -13,17 +21,34 @@ class GenerateContentStreaming extends StreamHandler
      *
      * {"candidates": [{"content": {"parts": [{"text": "Hello"}]}}]}
      *
+     * Thought summaries (`"thought": true` parts) are left out.
+     *
      * @param  array<string, mixed>  $data
      */
     public function text(array $data): ?string
     {
-        return $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
+        $parts = $data['candidates'][0]['content']['parts'] ?? null;
+
+        if (! is_array($parts)) {
+            return null;
+        }
+
+        $text = null;
+
+        foreach ($parts as $part) {
+            if (is_array($part) && is_string($part['text'] ?? null) && ! ($part['thought'] ?? false)) {
+                $text = ($text ?? '').$part['text'];
+            }
+        }
+
+        return $text;
     }
 
     /**
-     * Extract usage from Google streaming chunk.
+     * {"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "thoughtsTokenCount": 5, "serviceTier": "flex"}}
      *
-     * {"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "cachedContentTokenCount": 5}}
+     * Returns the normalised TokenMetrics keys, plus `pricing_tier` when the
+     * chunk reports its service tier and `tool_calls` for search grounding.
      *
      * @param  array<string, mixed>  $data
      * @param  array<string, mixed>  $currentUsage
@@ -31,16 +56,30 @@ class GenerateContentStreaming extends StreamHandler
      */
     public function usage(array $data, array $currentUsage): array
     {
-        if (isset($data['usageMetadata'])) {
-            return [
-                'prompt_tokens' => $data['usageMetadata']['promptTokenCount'] ?? 0,
-                'completion_tokens' => $data['usageMetadata']['candidatesTokenCount'] ?? 0,
-                'cached_tokens' => $data['usageMetadata']['cachedContentTokenCount'] ?? 0,
-                'reasoning_tokens' => $data['usageMetadata']['thoughtsTokenCount'] ?? 0,
-            ];
+        $grounding = GeminiUsage::groundingCalls($data);
+
+        if ($grounding !== []) {
+            $toolCalls = is_array($currentUsage['tool_calls'] ?? null) ? $currentUsage['tool_calls'] : [];
+
+            foreach ($grounding as $type => $count) {
+                $toolCalls[$type] = max((int) ($toolCalls[$type] ?? 0), $count);
+            }
+
+            $currentUsage['tool_calls'] = $toolCalls;
         }
 
-        return $currentUsage;
+        if (! is_array($data['usageMetadata'] ?? null)) {
+            return $currentUsage;
+        }
+
+        $usage = array_replace($currentUsage, GeminiUsage::tokens($data['usageMetadata'])->toUsageArray());
+        $tier = GeminiUsage::pricingTier($data['usageMetadata']['serviceTier'] ?? $data['serviceTier'] ?? null);
+
+        if ($tier !== null) {
+            $usage['pricing_tier'] = $tier;
+        }
+
+        return $usage;
     }
 
     /**
@@ -56,17 +95,20 @@ class GenerateContentStreaming extends StreamHandler
     }
 
     /**
-     * Extract model from Google streaming chunk.
+     * Extract model and response id from Google streaming chunk.
      *
-     * {"modelVersion": "gemini-1.5-pro-001"}
+     * {"modelVersion": "gemini-3.8-flash", "responseId": "mF3vaO..."}
      *
      * @param  array<string, mixed>  $data
      * @return array{model?: string|null, id?: string|null}|null
      */
     public function model(array $data): ?array
     {
-        if (isset($data['modelVersion'])) {
-            return ['model' => $data['modelVersion']];
+        if (isset($data['modelVersion']) || isset($data['responseId'])) {
+            return [
+                'model' => $data['modelVersion'] ?? null,
+                'id' => $data['responseId'] ?? null,
+            ];
         }
 
         return null;

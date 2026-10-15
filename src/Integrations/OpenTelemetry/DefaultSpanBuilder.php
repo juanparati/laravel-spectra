@@ -11,10 +11,10 @@ use Spectra\Contracts\SpanBuilder;
  * Default OpenTelemetry span builder.
  *
  * Builds OTLP-compatible spans following the OpenTelemetry semantic conventions
- * for GenAI operations. Override protected methods for partial customization,
- * or implement SpanBuilder from scratch for full control.
+ * for GenAI client inference spans. Override protected methods for partial
+ * customization, or implement SpanBuilder from scratch for full control.
  *
- * @see https://opentelemetry.io/docs/specs/semconv/gen-ai/
+ * @see https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/client-inference.md
  */
 class DefaultSpanBuilder implements SpanBuilder
 {
@@ -39,20 +39,29 @@ class DefaultSpanBuilder implements SpanBuilder
     }
 
     /**
-     * Build the span name.
+     * Spectra provider slugs mapped to `gen_ai.provider.name` well-known values.
      *
-     * Default: "ai.{provider}.{model}" (e.g. "ai.openai.gpt-4o").
+     * @var array<string, string>
      */
+    protected const PROVIDER_NAMES = [
+        'google' => 'gcp.gemini',
+        'xai' => 'x_ai',
+    ];
+
     /**
+     * Build the span name: "{gen_ai.operation.name} {gen_ai.request.model}"
+     * (e.g. "chat gpt-4o"), as the GenAI conventions recommend.
+     *
      * @param  array<string, mixed>  $data
      */
     protected function spanName(array $data): string
     {
-        return "ai.{$data['provider']}.{$data['model']}";
+        return trim($this->operationName($data).' '.$this->requestModel($data));
     }
 
     /**
-     * Build the span attributes array.
+     * Build the span attributes array, following the OpenTelemetry GenAI
+     * semantic conventions (gen_ai.*) plus Spectra's own spectra.* fields.
      *
      * Each attribute is an OTLP key-value pair:
      * ['key' => 'name', 'value' => ['stringValue' => 'value']]
@@ -63,59 +72,83 @@ class DefaultSpanBuilder implements SpanBuilder
     protected function attributes(array $data): array
     {
         $attributes = [
-            ['key' => 'gen_ai.system', 'value' => ['stringValue' => $data['provider']]],
-            ['key' => 'gen_ai.request.model', 'value' => ['stringValue' => $data['model']]],
-            ['key' => 'gen_ai.usage.prompt_tokens', 'value' => ['intValue' => $data['prompt_tokens']]],
-            ['key' => 'gen_ai.usage.completion_tokens', 'value' => ['intValue' => $data['completion_tokens']]],
-            ['key' => 'gen_ai.usage.total_tokens', 'value' => ['intValue' => $data['total_tokens']]],
+            $this->string('gen_ai.operation.name', $this->operationName($data)),
+            $this->string('gen_ai.provider.name', self::PROVIDER_NAMES[$data['provider']] ?? (string) $data['provider']),
+            $this->string('gen_ai.request.model', $this->requestModel($data)),
+            $this->int('gen_ai.usage.input_tokens', (int) ($data['prompt_tokens'] ?? 0)),
+            $this->int('gen_ai.usage.output_tokens', (int) ($data['completion_tokens'] ?? 0)),
 
-            ['key' => 'spectra.trace_id', 'value' => ['stringValue' => $data['trace_id'] ?? '']],
-            ['key' => 'spectra.request_id', 'value' => ['stringValue' => $data['id']]],
-            ['key' => 'spectra.cost_cents', 'value' => ['doubleValue' => $data['total_cost_in_cents']]],
-            ['key' => 'spectra.latency_ms', 'value' => ['intValue' => $data['latency_ms'] ?? 0]],
+            $this->string('spectra.trace_id', (string) ($data['trace_id'] ?? '')),
+            $this->string('spectra.request_id', (string) $data['id']),
+            $this->string('spectra.model', (string) $data['model']),
+            $this->double('spectra.cost_cents', (float) ($data['total_cost_in_cents'] ?? 0)),
+            $this->int('spectra.latency_ms', (int) ($data['latency_ms'] ?? 0)),
 
-            ['key' => 'http.response.status_code', 'value' => ['intValue' => $data['status_code'] ?? 0]],
+            $this->int('http.response.status_code', (int) ($data['status_code'] ?? 0)),
         ];
 
         if ($data['snapshot'] ?? null) {
-            $attributes[] = ['key' => 'gen_ai.response.model', 'value' => ['stringValue' => $data['snapshot']]];
+            $attributes[] = $this->string('gen_ai.response.model', (string) $data['snapshot']);
         }
 
         if ($data['response_id'] ?? null) {
-            $attributes[] = ['key' => 'gen_ai.response.id', 'value' => ['stringValue' => $data['response_id']]];
+            $attributes[] = $this->string('gen_ai.response.id', (string) $data['response_id']);
         }
 
         if ($data['finish_reason'] ?? null) {
-            $attributes[] = ['key' => 'gen_ai.response.finish_reason', 'value' => ['stringValue' => $data['finish_reason']]];
+            $attributes[] = [
+                'key' => 'gen_ai.response.finish_reasons',
+                'value' => ['arrayValue' => ['values' => [['stringValue' => (string) $data['finish_reason']]]]],
+            ];
         }
 
-        if ($data['model_type'] ?? null) {
-            $attributes[] = ['key' => 'spectra.model_type', 'value' => ['stringValue' => $data['model_type']]];
+        if (($data['cached_tokens'] ?? 0) > 0) {
+            $attributes[] = $this->int('gen_ai.usage.cache_read.input_tokens', (int) $data['cached_tokens']);
         }
 
-        if ($data['endpoint'] ?? null) {
-            $attributes[] = ['key' => 'gen_ai.operation.name', 'value' => ['stringValue' => $data['endpoint']]];
-        }
-
-        if ($data['pricing_tier'] ?? null) {
-            $attributes[] = ['key' => 'spectra.pricing_tier', 'value' => ['stringValue' => $data['pricing_tier']]];
-        }
-
-        if (($data['trackable_type'] ?? null) && ($data['trackable_id'] ?? null)) {
-            $attributes[] = ['key' => 'spectra.trackable.type', 'value' => ['stringValue' => $data['trackable_type']]];
-            $attributes[] = ['key' => 'spectra.trackable.id', 'value' => ['stringValue' => (string) $data['trackable_id']]];
+        if (($data['cache_write_tokens'] ?? 0) > 0) {
+            $attributes[] = $this->int('gen_ai.usage.cache_write.input_tokens', (int) $data['cache_write_tokens']);
         }
 
         if (($data['reasoning_tokens'] ?? 0) > 0) {
-            $attributes[] = ['key' => 'gen_ai.usage.reasoning_tokens', 'value' => ['intValue' => $data['reasoning_tokens']]];
-        }
-
-        if (($data['is_reasoning'] ?? false) && ($data['reasoning_effort'] ?? null)) {
-            $attributes[] = ['key' => 'spectra.reasoning_effort', 'value' => ['stringValue' => $data['reasoning_effort']]];
+            $attributes[] = $this->int('gen_ai.usage.reasoning.output_tokens', (int) $data['reasoning_tokens']);
         }
 
         if ($data['is_streaming'] ?? false) {
-            $attributes[] = ['key' => 'spectra.is_streaming', 'value' => ['boolValue' => true]];
+            $attributes[] = ['key' => 'gen_ai.request.stream', 'value' => ['boolValue' => true]];
+        }
+
+        if ($data['conversation_id'] ?? null) {
+            $attributes[] = $this->string('gen_ai.conversation.id', (string) $data['conversation_id']);
+        }
+
+        if ($data['is_failed'] ?? false) {
+            $attributes[] = $this->string('error.type', (string) ($data['error_type'] ?? ($data['status_code'] ?? '_OTHER')));
+        }
+
+        if ($data['model_type'] ?? null) {
+            $attributes[] = $this->string('spectra.model_type', (string) $data['model_type']);
+        }
+
+        if ($data['endpoint'] ?? null) {
+            $attributes[] = $this->string('spectra.endpoint', (string) $data['endpoint']);
+        }
+
+        if ($data['pricing_tier'] ?? null) {
+            $attributes[] = $this->string('spectra.pricing_tier', (string) $data['pricing_tier']);
+        }
+
+        if ($data['currency'] ?? null) {
+            $attributes[] = $this->string('spectra.currency', (string) $data['currency']);
+        }
+
+        if (($data['trackable_type'] ?? null) && ($data['trackable_id'] ?? null)) {
+            $attributes[] = $this->string('spectra.trackable.type', (string) $data['trackable_type']);
+            $attributes[] = $this->string('spectra.trackable.id', (string) $data['trackable_id']);
+        }
+
+        if (($data['is_reasoning'] ?? false) && ($data['reasoning_effort'] ?? null)) {
+            $attributes[] = $this->string('spectra.reasoning_effort', (string) $data['reasoning_effort']);
         }
 
         if ($data['has_tool_calls'] ?? false) {
@@ -123,18 +156,73 @@ class DefaultSpanBuilder implements SpanBuilder
         }
 
         if ($data['time_to_first_token_ms'] ?? null) {
-            $attributes[] = ['key' => 'spectra.time_to_first_token_ms', 'value' => ['intValue' => $data['time_to_first_token_ms']]];
+            $attributes[] = $this->int('spectra.time_to_first_token_ms', (int) $data['time_to_first_token_ms']);
         }
 
         if ($data['tokens_per_second'] ?? null) {
-            $attributes[] = ['key' => 'spectra.tokens_per_second', 'value' => ['doubleValue' => $data['tokens_per_second']]];
+            $attributes[] = $this->double('spectra.tokens_per_second', (float) $data['tokens_per_second']);
         }
 
         if ($data['duration_seconds'] ?? null) {
-            $attributes[] = ['key' => 'spectra.duration_seconds', 'value' => ['doubleValue' => $data['duration_seconds']]];
+            $attributes[] = $this->double('spectra.duration_seconds', (float) $data['duration_seconds']);
         }
 
         return $attributes;
+    }
+
+    /**
+     * `gen_ai.operation.name`: a well-known value where one applies.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function operationName(array $data): string
+    {
+        $endpoint = (string) ($data['endpoint'] ?? '');
+
+        return match (true) {
+            ($data['model_type'] ?? null) === 'embedding' => 'embeddings',
+            str_contains($endpoint, 'rerank') => 'rerank',
+            str_contains($endpoint, 'generateContent') || str_contains($endpoint, 'GenerateContent') => 'generate_content',
+            (bool) preg_match('#/v1/completions$#', $endpoint) => 'text_completion',
+            in_array($data['model_type'] ?? null, ['image', 'video', 'tts'], true) => 'generate_content',
+            ($data['model_type'] ?? null) === 'stt' => 'transcription',
+            default => 'chat',
+        };
+    }
+
+    /**
+     * The model id the request ran on. The `model` column holds the catalog
+     * display name, so the provider's model id (snapshot) is preferred.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function requestModel(array $data): string
+    {
+        return (string) ($data['snapshot'] ?? null ?: $data['model']);
+    }
+
+    /**
+     * @return array{key: string, value: array{stringValue: string}}
+     */
+    protected function string(string $key, string $value): array
+    {
+        return ['key' => $key, 'value' => ['stringValue' => $value]];
+    }
+
+    /**
+     * @return array{key: string, value: array{intValue: int}}
+     */
+    protected function int(string $key, int $value): array
+    {
+        return ['key' => $key, 'value' => ['intValue' => $value]];
+    }
+
+    /**
+     * @return array{key: string, value: array{doubleValue: float}}
+     */
+    protected function double(string $key, float $value): array
+    {
+        return ['key' => $key, 'value' => ['doubleValue' => $value]];
     }
 
     /**
@@ -148,7 +236,7 @@ class DefaultSpanBuilder implements SpanBuilder
         if ($data['is_failed'] ?? false) {
             return [
                 'code' => 2, // STATUS_CODE_ERROR
-                'message' => 'Request failed',
+                'message' => (string) ($data['error_message'] ?? null ?: 'Request failed'),
             ];
         }
 

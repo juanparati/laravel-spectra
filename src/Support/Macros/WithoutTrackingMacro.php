@@ -6,14 +6,18 @@ namespace Spectra\Support\Macros;
 
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
+use Spectra\Support\Tracking\GuzzleMiddleware;
 
+/**
+ * `Http::withoutAITracking()` — skip tracking for one request.
+ */
 class WithoutTrackingMacro
 {
     public static function register(): void
     {
         Http::macro('withoutAITracking', function () {
             /** @var PendingRequest $this */
-            return $this->withHeaders(['X-Spectra-Manual-Tracking' => '1']);
+            return $this->withOptions([GuzzleMiddleware::OPTION_DISABLED => true]);
         });
     }
 }

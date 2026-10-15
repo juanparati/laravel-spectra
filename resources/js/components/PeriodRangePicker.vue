@@ -110,7 +110,7 @@ const onRangeChange = (range) => {
 
 <template>
     <div class="flex flex-col sm:flex-row gap-2 sm:gap-3">
-        <div class="w-full sm:w-56">
+        <div class="w-full sm:w-48">
             <label v-if="label" class="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">{{ label }}</label>
             <select
                 v-model="periodModel"
@@ -126,7 +126,7 @@ const onRangeChange = (range) => {
             </select>
         </div>
 
-        <div class="w-full sm:w-56">
+        <div class="w-full sm:w-48">
             <VueDatePicker
                 v-model="rangeModel"
                 auto-apply

@@ -6,6 +6,9 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 use Spectra\Providers\Groq\Handlers\ChatHandler;
+use Spectra\Providers\Groq\Handlers\ResponsesHandler;
+use Spectra\Providers\Groq\Handlers\SpeechHandler;
+use Spectra\Providers\Groq\Handlers\TranscriptionHandler;
 use Spectra\Support\ProviderRegistry;
 
 it('returns groq as provider', function () {
@@ -24,6 +27,20 @@ it('resolves chat handler for groq endpoint', function () {
     $handler = $this->groqProvider()->resolveHandler('/openai/v1/chat/completions');
 
     expect($handler)->toBeInstanceOf(ChatHandler::class);
+});
+
+it('resolves a handler for every tracked endpoint', function (string $endpoint, string $handler) {
+    expect($this->groqProvider()->resolveHandler($endpoint))->toBeInstanceOf($handler);
+})->with([
+    ['/openai/v1/chat/completions', ChatHandler::class],
+    ['/openai/v1/responses', ResponsesHandler::class],
+    ['/openai/v1/audio/transcriptions', TranscriptionHandler::class],
+    ['/openai/v1/audio/translations', TranscriptionHandler::class],
+    ['/openai/v1/audio/speech', SpeechHandler::class],
+]);
+
+it('uses the x_groq id when the response has no id', function () {
+    expect($this->groqProvider()->extractResponseId(['text' => 'hi', 'x_groq' => ['id' => 'req_1']]))->toBe('req_1');
 });
 
 it('chat handler returns text model type', function () {

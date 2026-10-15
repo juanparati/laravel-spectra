@@ -1,0 +1,62 @@
+{
+  "id": "resp_6c7d8e9f0a1b2c3d4e5f60718293a4b5",
+  "object": "response",
+  "created_at": 1792051300,
+  "status": "completed",
+  "background": false,
+  "completed_at": 1792051341,
+  "error": null,
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "model": "gpt-6-astra",
+  "output": [
+    {
+      "id": "msg_6c7d8e9f0a1b2c3d4e5f60718293a4b5",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "logprobs": [],
+          "text": "The repository has 14 modules; the billing module depends on all others."
+        }
+      ],
+      "role": "assistant"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "previous_response_id": null,
+  "reasoning": {
+    "effort": "none",
+    "summary": null
+  },
+  "service_tier": "default",
+  "store": true,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_p": 1.0,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 300000,
+    "input_tokens_details": {
+      "cached_tokens": 200000,
+      "cache_write_tokens": 50000
+    },
+    "output_tokens": 4000,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 304000
+  },
+  "user": null,
+  "metadata": {}
+}

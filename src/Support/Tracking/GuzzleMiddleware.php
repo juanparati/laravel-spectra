@@ -5,39 +5,61 @@ declare(strict_types=1);
 namespace Spectra\Support\Tracking;
 
 use GuzzleHttp\Promise\PromiseInterface;
+use Illuminate\Support\Facades\Cache;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use Spectra\Concerns\ParsesRequestData;
 use Spectra\Contracts\ExtractsPricingTierFromRequest;
 use Spectra\Contracts\ReturnsBinaryResponse;
 use Spectra\Contracts\SkipsResponse;
 use Spectra\Spectra;
 use Spectra\Support\ProviderRegistry;
+use Throwable;
 
 /**
- * Guzzle middleware for tracking AI requests.
+ * Guzzle middleware that tracks AI requests.
  *
- * Usage:
+ * This is the one tracking path for every HTTP route into a provider:
+ * Laravel's HTTP client (registered as global middleware by HttpWatcher),
+ * the openai-php client (OpenAiWatcher), the tracked handler stacks
+ * (GuzzleWatcher), and the `withAITracking()` macro.
+ *
+ * Rules it keeps:
+ * - It never reads a body the application hasn't read yet unless the body
+ *   can be rewound. Streamed and one-pass bodies are wrapped in a
+ *   TrackedStream and recorded once the application has read them.
+ * - Tracking errors are reported, never thrown into the application.
+ *
+ * Usage with your own Guzzle client:
  * ```php
- * use Spectra\Support\Tracking\GuzzleMiddleware;
- * use GuzzleHttp\Client;
- * use GuzzleHttp\HandlerStack;
- *
  * $stack = HandlerStack::create();
- * $stack->push(GuzzleMiddleware::create('openai', 'gpt-4o'));
- *
+ * $stack->push(GuzzleMiddleware::create('openai'));
  * $client = new Client(['handler' => $stack]);
  * ```
  */
 class GuzzleMiddleware
 {
+    use ParsesRequestData;
+
+    /** Request option that turns tracking off for one request (`Http::withoutAITracking()`). */
+    public const OPTION_DISABLED = 'spectra_disabled';
+
+    /** Request option set by `withAITracking()` so the global middleware leaves the request to it. */
+    public const OPTION_MANUAL = 'spectra_manual';
+
+    /** Legacy opt-out header, still honoured. */
+    public const MANUAL_TRACKING_HEADER = 'X-Spectra-Manual-Tracking';
+
     /**
-     * @param  array<string, mixed>  $options
+     * @param  string  $provider  A provider slug, or 'auto' to detect it from the host.
+     * @param  array<string, mixed>  $options  Passed to Spectra::startRequest() (tags, metadata, pricing_tier, ...).
+     * @param  bool  $manual  True for the `withAITracking()` macro: tracks any endpoint of the given provider.
      */
     public function __construct(
-        protected Spectra $manager,
         protected string $provider,
         protected string $defaultModel = 'unknown',
         protected array $options = [],
+        protected bool $manual = false,
     ) {}
 
     /**
@@ -46,16 +68,20 @@ class GuzzleMiddleware
     public static function create(
         string $provider,
         string $defaultModel = 'unknown',
-        array $options = []
+        array $options = [],
+        bool $manual = false,
     ): callable {
-        return function (callable $handler) use ($provider, $defaultModel, $options) {
-            $manager = app(Spectra::class);
-            $middleware = new self($manager, $provider, $defaultModel, $options);
+        $middleware = new self($provider, $defaultModel, $options, $manual);
 
-            return function (RequestInterface $request, array $requestOptions) use ($handler, $middleware) {
-                return $middleware($handler, $request, $requestOptions);
-            };
-        };
+        return fn (callable $handler) => fn (RequestInterface $request, array $requestOptions) => $middleware($handler, $request, $requestOptions);
+    }
+
+    /**
+     * Middleware that detects the provider from the request host.
+     */
+    public static function auto(): callable
+    {
+        return self::create('auto');
     }
 
     /**
@@ -63,69 +89,25 @@ class GuzzleMiddleware
      */
     public function __invoke(callable $handler, RequestInterface $request, array $options): PromiseInterface
     {
-        if (! $this->manager->isEnabled()) {
+        $context = $this->safely(fn () => $this->start($request, $options));
+
+        if (! $context instanceof RequestContext) {
             return $handler($request, $options);
         }
 
-        $registry = app(ProviderRegistry::class);
-        $provider = $this->resolveProvider($request, $registry);
+        try {
+            $promise = $handler($request, $options);
+        } catch (Throwable $exception) {
+            // Some handlers (and HTTP fakes) throw instead of rejecting.
+            $this->safely(fn () => $this->onException($context, $exception));
 
-        if ($provider === null) {
-            return $handler($request, $options);
+            throw $exception;
         }
 
-        $uri = $request->getUri();
-
-        if (! $registry->isTrackableEndpoint($provider, $uri->getPath())) {
-            return $handler($request, $options);
-        }
-
-        $requestData = $this->parseRequestBody($request);
-
-        $providerInstance = $registry->provider($provider);
-        $model = $providerInstance?->extractModelFromRequest($requestData, $uri->getPath())
-            ?? $this->defaultModel;
-
-        $context = $this->manager->startRequest($provider, $model, array_merge([
-            'endpoint' => $request->getUri()->getPath(),
-            'operation' => $request->getMethod(),
-        ], $this->options));
-
-        $context->requestData = $requestData;
-        $context->endpoint = $request->getUri()->getPath();
-
-        if ($context->pricingTier === null) {
-            $tier = $providerInstance instanceof ExtractsPricingTierFromRequest
-                ? $providerInstance->extractPricingTierFromRequest($requestData)
-                : null;
-            $context->withPricingTier(
-                $tier
-                ?? $this->options['pricing_tier']
-                ?? config("spectra.costs.provider_settings.{$provider}.default_tier", 'standard')
-            );
-        }
-
-        return $handler($request, $options)->then(
-            function (ResponseInterface $response) use ($context, $requestData) {
-                // Skip automatic tracking for streaming responses
-                // User should use Spectra::stream() for these
-                if (StreamDetector::isStreamingResponse($response, $context->provider, $context->endpoint, $requestData)) {
-                    $this->manager->setPendingStreamContext($context);
-
-                    return $response;
-                }
-
-                $this->handleSuccess($context, $response);
-
-                return $response;
-            },
-            function (\Throwable $exception) use ($context) {
-                $httpStatus = null;
-                if (method_exists($exception, 'getResponse') && $exception->getResponse()) {
-                    $httpStatus = $exception->getResponse()->getStatusCode();
-                }
-
-                $this->manager->recordFailure($context, $exception, $httpStatus);
+        return $promise->then(
+            fn (ResponseInterface $response) => $this->safely(fn () => $this->onResponse($context, $response)) ?? $response,
+            function (Throwable $exception) use ($context) {
+                $this->safely(fn () => $this->onException($context, $exception));
 
                 throw $exception;
             }
@@ -133,120 +115,247 @@ class GuzzleMiddleware
     }
 
     /**
-     * @return array<string, mixed>
+     * @param  array<string, mixed>  $options
      */
-    protected function parseRequestBody(RequestInterface $request): array
+    protected function start(RequestInterface $request, array $options): ?RequestContext
     {
-        try {
-            $contentType = $request->getHeaderLine('Content-Type');
+        $manager = app(Spectra::class);
 
-            if (str_contains($contentType, 'multipart/form-data')) {
-                return $this->parseMultipartBody($request, $contentType);
-            }
-
-            $body = (string) $request->getBody();
-
-            try {
-                $request->getBody()->rewind();
-            } catch (\Throwable) {
-                // Some streams don't support rewind — body is still usable for parsing
-            }
-
-            return json_decode($body, true) ?? [];
-        } catch (\Throwable) {
-            return [];
+        if (! $manager->isEnabled() || ($options[self::OPTION_DISABLED] ?? false)) {
+            return null;
         }
+
+        // Requests handed to withAITracking() are tracked by its own middleware.
+        if (! $this->manual && (($options[self::OPTION_MANUAL] ?? false) || $request->hasHeader(self::MANUAL_TRACKING_HEADER))) {
+            return null;
+        }
+
+        $registry = app(ProviderRegistry::class);
+        $provider = $this->resolveProvider($request, $registry);
+
+        if ($provider === null) {
+            return null;
+        }
+
+        $path = $request->getUri()->getPath();
+
+        if (! $this->manual && ! $registry->isTrackableEndpoint($provider, $path)) {
+            return null;
+        }
+
+        $requestData = self::parsePsrRequestData($request);
+        $providerInstance = $registry->provider($provider);
+
+        $model = $providerInstance?->extractModelFromRequest($requestData, $path)
+            ?? (is_string($requestData['model'] ?? null) ? $requestData['model'] : null)
+            ?? $this->defaultModel;
+
+        $context = $manager->startRequest($provider, $model, array_merge([
+            'endpoint' => $path,
+            'operation' => $request->getMethod(),
+        ], $this->options));
+
+        $context->requestData = $requestData;
+        $context->endpoint = $path;
+
+        if ($providerInstance instanceof ExtractsPricingTierFromRequest) {
+            $context->requestedPricingTier = $providerInstance->extractPricingTierFromRequest($requestData);
+        }
+
+        return $context;
     }
 
-    /**
-     * Parse multipart/form-data body to extract text fields (skipping file uploads).
-     *
-     * Only reads the first 8KB to avoid loading large audio/image files into memory.
-     */
-    /**
-     * @return array<string, mixed>
-     */
-    protected function parseMultipartBody(RequestInterface $request, string $contentType): array
-    {
-        try {
-            preg_match('/boundary=(.+?)(?:;|$)/', $contentType, $matches);
-            $boundary = trim($matches[1] ?? '', '"');
-
-            if ($boundary === '') {
-                return [];
-            }
-
-            $body = $request->getBody()->read(8192);
-            $request->getBody()->rewind();
-
-            $fields = [];
-            $parts = explode('--'.$boundary, $body);
-
-            foreach ($parts as $part) {
-                $part = ltrim($part, "\r\n");
-
-                if ($part === '' || $part === '--' || str_starts_with($part, '--')) {
-                    continue;
-                }
-
-                // Skip file uploads
-                if (str_contains($part, 'filename=')) {
-                    continue;
-                }
-
-                if (preg_match('/Content-Disposition:.*?name="([^"]+)"/i', $part, $nameMatch)) {
-                    $headerEnd = strpos($part, "\r\n\r\n");
-
-                    if ($headerEnd !== false) {
-                        $value = substr($part, $headerEnd + 4);
-                        $fields[$nameMatch[1]] = rtrim($value, "\r\n");
-                    }
-                }
-            }
-
-            return $fields;
-        } catch (\Throwable) {
-            return [];
-        }
-    }
-
-    protected function handleSuccess(RequestContext $context, ResponseInterface $response): void
+    protected function onResponse(RequestContext $context, ResponseInterface $response): ResponseInterface
     {
         $context->httpStatus = $response->getStatusCode();
 
+        if ($response->getStatusCode() >= 400) {
+            return $this->withBody($response, fn (string $body) => $this->recordHttpError($context, $response->getStatusCode(), $body));
+        }
+
+        if (StreamDetector::isStreamingResponse($response, $context->provider, $context->endpoint, $context->requestData ?? [])) {
+            return $this->trackStream($context, $response);
+        }
+
+        return $this->withBody($response, fn (string $body) => $this->recordBody($context, $body));
+    }
+
+    protected function onException(RequestContext $context, Throwable $exception): void
+    {
+        $httpStatus = null;
+
+        if (method_exists($exception, 'getResponse') && ($response = $exception->getResponse()) instanceof ResponseInterface) {
+            $httpStatus = $response->getStatusCode();
+        }
+
+        app(Spectra::class)->recordFailure($context, $exception, $httpStatus);
+    }
+
+    /**
+     * Read the body now when it can be rewound; otherwise let the application
+     * read it first and receive the bytes as it does.
+     *
+     * @param  callable(string): void  $record
+     */
+    protected function withBody(ResponseInterface $response, callable $record): ResponseInterface
+    {
+        $body = $response->getBody();
+
+        if ($body->isSeekable()) {
+            $contents = (string) $body;
+            $body->rewind();
+            $record($contents);
+
+            return $response;
+        }
+
+        $buffer = '';
+
+        return $response->withBody(new TrackedStream(
+            $body,
+            function (string $bytes) use (&$buffer) {
+                $buffer .= $bytes;
+            },
+            function () use (&$buffer, $record) {
+                $record($buffer);
+            },
+        ));
+    }
+
+    protected function trackStream(RequestContext $context, ResponseInterface $response): ResponseInterface
+    {
+        $manager = app(Spectra::class);
+        $tracker = StreamingTracker::forContext($context);
+        $parser = new StreamEventParser($response->getHeaderLine('Content-Type'));
+
+        // A manual Spectra::stream() wrapped around the same response claims
+        // this context and records it instead.
+        $manager->setPendingStreamContext($context);
+
+        return $response->withBody(new TrackedStream(
+            $response->getBody(),
+            function (string $bytes) use ($parser, $tracker, $context) {
+                foreach ($parser->push($bytes) as $event) {
+                    if (! $context->streamClaimed) {
+                        $tracker->ingest($event);
+                    }
+                }
+            },
+            function () use ($parser, $tracker, $context) {
+                foreach ($parser->finish() as $event) {
+                    if (! $context->streamClaimed) {
+                        $tracker->ingest($event);
+                    }
+                }
+
+                app(Spectra::class)->clearPendingStreamContext($context);
+
+                if (! $context->streamClaimed) {
+                    $tracker->finish();
+                }
+            },
+        ));
+    }
+
+    protected function recordBody(RequestContext $context, string $rawBody): void
+    {
+        $providerInstance = app(ProviderRegistry::class)->provider($context->provider);
+        $handler = $providerInstance?->resolveHandler($context->endpoint ?? '');
+
+        if ($handler instanceof ReturnsBinaryResponse) {
+            $context->rawResponseBody = $rawBody;
+            $body = [];
+        } else {
+            $decoded = json_decode($rawBody, true);
+            $body = is_array($decoded) ? $decoded : [];
+        }
+
+        $handler = $providerInstance?->resolveHandler($context->endpoint ?? '', $body);
+        $jobId = $providerInstance?->extractResponseId($body, $context->endpoint ?? '');
+
+        if ($handler instanceof SkipsResponse && $handler->shouldSkipResponse($body)) {
+            // An async job was submitted or is still running; the poll that
+            // sees it finish is recorded, and may not name the model again.
+            $this->rememberJobModel($context, $jobId);
+
+            return;
+        }
+
+        $this->restoreJobModel($context, $jobId);
+
+        app(Spectra::class)->recordSuccess($context, $body);
+    }
+
+    protected function rememberJobModel(RequestContext $context, ?string $jobId): void
+    {
+        if ($jobId === null || $jobId === '' || $context->model === '' || $context->model === 'unknown') {
+            return;
+        }
+
         try {
-            $rawBody = (string) $response->getBody();
-            $response->getBody()->rewind();
-
-            $handler = app(ProviderRegistry::class)->provider($context->provider)
-                ?->resolveHandler($context->endpoint ?? '');
-
-            if ($handler instanceof ReturnsBinaryResponse) {
-                $context->rawResponseBody = $rawBody;
-                $body = [];
-            } else {
-                $body = json_decode($rawBody, true) ?? [];
-            }
-
-            if ($this->shouldSkipResponse($context, $body)) {
-                return;
-            }
-
-            $this->manager->recordSuccess($context, $body);
-        } catch (\Throwable $e) {
-            $this->manager->recordFailure($context, $e, $response->getStatusCode());
+            Cache::put($this->jobModelKey($context->provider, $jobId), $context->model, now()->addDay());
+        } catch (Throwable) {
+            // Without a cache the poll keeps whatever model it can see.
         }
     }
 
     /**
-     * @param  array<string, mixed>  $body
+     * Use the model remembered from the job's submit request when the poll
+     * doesn't name one, or names only a prefix of it (fal's result URLs drop
+     * the model's sub-path, e.g. `fal-ai/flux` for `fal-ai/flux/dev`).
      */
-    protected function shouldSkipResponse(RequestContext $context, array $body): bool
+    protected function restoreJobModel(RequestContext $context, ?string $jobId): void
     {
-        $providerInstance = app(ProviderRegistry::class)->provider($context->provider);
-        $handler = $providerInstance?->resolveHandler($context->endpoint ?? '', $body);
+        if ($jobId === null || $jobId === '') {
+            return;
+        }
 
-        return $handler instanceof SkipsResponse && $handler->shouldSkipResponse($body);
+        try {
+            $remembered = Cache::get($this->jobModelKey($context->provider, $jobId));
+        } catch (Throwable) {
+            return;
+        }
+
+        if (! is_string($remembered) || $remembered === $context->model) {
+            return;
+        }
+
+        if ($context->model === 'unknown' || $context->model === '' || str_starts_with($remembered, rtrim($context->model, '/').'/')) {
+            $context->model = $remembered;
+        }
+    }
+
+    protected function jobModelKey(string $provider, string $jobId): string
+    {
+        return 'spectra:job-model:'.$provider.':'.sha1($jobId);
+    }
+
+    protected function recordHttpError(RequestContext $context, int $status, string $body): void
+    {
+        app(Spectra::class)->recordFailure($context, new ProviderErrorException(self::errorMessage($body, $status), $status), $status);
+    }
+
+    /**
+     * The provider's error message from an error body, falling back to the raw body.
+     */
+    public static function errorMessage(string $body, int $status): string
+    {
+        $decoded = json_decode($body, true);
+
+        if (is_array($decoded)) {
+            $error = $decoded['error'] ?? $decoded;
+            $message = is_array($error)
+                ? ($error['message'] ?? $error['detail'] ?? $decoded['message'] ?? $decoded['detail'] ?? null)
+                : $error;
+
+            if (is_string($message) && $message !== '') {
+                return $message;
+            }
+        }
+
+        $body = trim($body);
+
+        return $body !== '' ? mb_substr($body, 0, 2000) : "HTTP {$status}";
     }
 
     protected function resolveProvider(RequestInterface $request, ProviderRegistry $registry): ?string
@@ -266,5 +375,24 @@ class GuzzleMiddleware
 
         return $registry->detectProvider($hostWithPort)
             ?? $registry->detectProvider($host);
+    }
+
+    /**
+     * Run a tracking step; report and swallow anything it throws.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T|null
+     */
+    protected function safely(callable $callback): mixed
+    {
+        try {
+            return $callback();
+        } catch (Throwable $e) {
+            report($e);
+
+            return null;
+        }
     }
 }

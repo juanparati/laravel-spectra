@@ -6,6 +6,8 @@ namespace Spectra\Providers\OpenAI;
 
 use Spectra\Contracts\ExtractsPricingTierFromRequest;
 use Spectra\Contracts\ExtractsPricingTierFromResponse;
+use Spectra\Enums\PricingTier;
+use Spectra\Providers\OpenAI\Handlers\BackgroundResponseHandler;
 use Spectra\Providers\OpenAI\Handlers\EmbeddingHandler;
 use Spectra\Providers\OpenAI\Handlers\ImageHandler;
 use Spectra\Providers\OpenAI\Handlers\ResponsesImageHandler;
@@ -20,6 +22,7 @@ use Spectra\Providers\Provider;
  *
  * Each handler knows its endpoints, response shapes, and how to extract
  * metrics/content for its capability type (text, images, embeddings, audio).
+ * The provider itself maps OpenAI's `service_tier` to Spectra pricing tiers.
  */
 class OpenAI extends Provider implements ExtractsPricingTierFromRequest, ExtractsPricingTierFromResponse
 {
@@ -28,52 +31,101 @@ class OpenAI extends Provider implements ExtractsPricingTierFromRequest, Extract
         return 'openai';
     }
 
+    /**
+     * The global host plus the regional (data residency) hosts.
+     *
+     * Regional endpoints add a 10% uplift for models released on or after
+     * 2026-03-05; the uplift is not applied yet because the request host is
+     * not available when the cost is calculated.
+     */
     public function getHosts(): array
     {
-        return ['api.openai.com'];
+        return [
+            'api.openai.com',
+            'us.api.openai.com',
+            'eu.api.openai.com',
+            'au.api.openai.com',
+            'ca.api.openai.com',
+            'jp.api.openai.com',
+            'in.api.openai.com',
+            'sg.api.openai.com',
+            'kr.api.openai.com',
+            'gb.api.openai.com',
+            'ae.api.openai.com',
+        ];
     }
 
     /**
-     * Order matters: when multiple handlers match the same endpoint,
-     * specialists (MatchesResponseShape) are checked in reverse order.
-     * Place specialist handlers after the default handler they override.
+     * Order matters:
+     * - TextHandler comes first because a stream without a known endpoint
+     *   (a bare Spectra::stream()) uses the first handler that streams.
+     * - When several handlers match the same endpoint, specialists
+     *   (MatchesResponseShape) are checked in reverse order, so they come
+     *   after the default handler they override.
      */
     public function handlers(): array
     {
         return [
+            app(TextHandler::class),
             app(ImageHandler::class),
             app(VideoHandler::class),
             app(EmbeddingHandler::class),
             app(TranscriptionHandler::class),
             app(SpeechHandler::class),
-            app(TextHandler::class),
             app(ResponsesImageHandler::class), // Specialist: overrides TextHandler for /v1/responses with image output
+            app(BackgroundResponseHandler::class),
         ];
     }
 
-    /** @param  array<string, mixed>  $requestData */
+    /**
+     * The tier the request asked for. Only used when the response doesn't
+     * say which tier served it.
+     *
+     * @param  array<string, mixed>  $requestData
+     */
     public function extractPricingTierFromRequest(array $requestData): ?string
     {
-        $serviceTier = $requestData['service_tier'] ?? null;
+        $serviceTier = self::pricingTierFor($requestData['service_tier'] ?? null);
 
-        return $serviceTier !== null ? $this->mapServiceTier($serviceTier) : null;
+        if ($serviceTier !== null) {
+            return $serviceTier;
+        }
+
+        // DALL-E 3 bills HD images at a higher per-image price.
+        if (($requestData['quality'] ?? null) === 'hd') {
+            return PricingTier::Hd->value;
+        }
+
+        return null;
     }
 
     /** @param  array<string, mixed>  $responseData */
     public function extractPricingTierFromResponse(array $responseData): ?string
     {
-        $serviceTier = $responseData['service_tier'] ?? null;
-
-        return $serviceTier !== null ? $this->mapServiceTier($serviceTier) : null;
+        return self::pricingTierFor($responseData['service_tier'] ?? null);
     }
 
-    protected function mapServiceTier(string $serviceTier): string
+    /**
+     * Map an OpenAI `service_tier` value to a Spectra pricing tier.
+     *
+     * OpenAI renamed Priority processing to Fast mode on 2026-07-30 and
+     * accepts both names; GPT-5.6 and earlier models still answer `priority`.
+     * The catalog keeps Fast prices under the `priority` tier. `scale` (Scale
+     * Tier) is prepaid capacity billed at standard token rates.
+     */
+    public static function pricingTierFor(mixed $serviceTier): ?string
     {
+        if (! is_string($serviceTier)) {
+            return null;
+        }
+
         return match ($serviceTier) {
-            'flex' => 'flex',
-            'priority' => 'priority',
-            'default', 'auto' => config("spectra.costs.provider_settings.{$this->getProvider()}.default_tier", 'standard'),
-            default => $serviceTier,
+            'default', 'auto', 'scale', 'standard' => PricingTier::Standard->value,
+            'flex' => PricingTier::Flex->value,
+            'priority', 'fast' => PricingTier::Priority->value,
+            'ultrafast' => PricingTier::Ultrafast->value,
+            'batch' => PricingTier::Batch->value,
+            default => null,
         };
     }
 }

@@ -6,9 +6,15 @@ defineProps({
         type: String,
         required: true,
     },
+    // Kept for backwards compatibility with older screens; no longer rendered.
     gradient: {
         type: String,
-        default: 'from-primary-500 to-cyan-500',
+        default: null,
+    },
+    // Optional accent dot color (any CSS color).
+    accent: {
+        type: String,
+        default: null,
     },
     loading: {
         type: Boolean,
@@ -26,16 +32,19 @@ defineProps({
 </script>
 
 <template>
-    <div class="stat-card !p-5 relative overflow-hidden">
-        <div :class="['absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r', gradient]"></div>
-        <div class="stat-label">{{ label }}</div>
+    <div class="stat-card flex flex-col">
+        <div class="flex items-center gap-2">
+            <span v-if="accent" class="h-2 w-2 rounded-full" :style="{ backgroundColor: accent }" aria-hidden="true"></span>
+            <div class="stat-label">{{ label }}</div>
+            <div class="ml-auto"><slot name="action" /></div>
+        </div>
         <template v-if="loading">
             <Skeleton variant="text" :width="skeletonWidth" height="2rem" class="mt-2" />
         </template>
         <template v-else>
             <slot />
         </template>
-        <div v-if="periodLabel" class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ periodLabel }}</div>
+        <div v-if="periodLabel" class="mt-1 text-xs text-gray-400 dark:text-gray-500">{{ periodLabel }}</div>
         <slot name="footer" />
     </div>
 </template>

@@ -17,15 +17,47 @@ The schema migrations create the following tables:
 | `spectra_tags` | Tag name lookup table for request categorization |
 | `spectra_requests_tags` | Pivot table linking requests to tags |
 
+Spectra ships these migration files:
+
+| Migration | What it does |
+| --- | --- |
+| `create_spectra_entries` | Creates the five tables above |
+| `change_trackable_id_to_string_on_spectra_tables` | Stores trackable ids as strings, so UUID, ULID, and integer keys all work |
+| `add_v2_tracking_columns_to_spectra_tables` | Adds the Spectra 2.0 columns (see below) |
+
 ### Publishing Schema Migrations
 
-If you need to customize the table structure, publish the schema migrations to your application:
+Publish the schema migrations to your application:
 
 ```shell
 php artisan vendor:publish --tag=spectra-migrations
 ```
 
-This copies the migration files to `database/migrations/` with their original filenames.
+This copies the migration files to `database/migrations/`. By default, Laravel gives the copies the current date in their file names, so they run after your own migrations.
+
+<a name="v2-migration"></a>
+## The 2.0 Migration
+
+Spectra 2.0 adds columns for prompt-cache usage, page counts, error details, conversation ids, and request origin. Earlier versions tracked some of these values in memory but never saved them.
+
+| Table | New columns |
+| --- | --- |
+| `spectra_requests` | `cached_tokens`, `cache_write_tokens`, `page_count`, `currency`, `error_type`, `error_message`, `conversation_id` (indexed), `conversation_turn`, `request_source`, `laravel_request_id`, `ip_address`, `user_agent` |
+| `spectra_daily_stats` | `total_cached_tokens`, `total_cache_write_tokens`, `total_pages` |
+
+When you upgrade from 1.x, run the installer again:
+
+```shell
+php artisan spectra:install
+```
+
+It publishes only the migrations your app doesn't have yet (it compares names without the date prefix), then asks if it should run them.
+
+::: warning Don't re-run vendor:publish for migrations
+`php artisan vendor:publish --tag=spectra-migrations` gives every published migration today's date, so it can't tell that you already have Spectra's older migrations and copies them again. If you already did this, delete the new copies of `create_spectra_entries` and `change_trackable_id_to_string_on_spectra_tables` before you run `php artisan migrate`.
+:::
+
+Run this migration before you deploy 2.0. Without the new columns, Spectra can't save requests. Your app keeps working, because saving errors go to your exception handler instead of being thrown, but the requests are not recorded.
 
 ### Custom Database Connection
 

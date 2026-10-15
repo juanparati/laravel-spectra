@@ -1,0 +1,102 @@
+{
+  "id": "msg_01AbCdEfGhIjKlMnOpQrStUv",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "I'll search for the latest release notes."
+    },
+    {
+      "type": "server_tool_use",
+      "id": "srvtoolu_01WYG3ziw53XMcoyKL4XcZmE",
+      "name": "web_search",
+      "input": {
+        "query": "laravel 13 release notes"
+      }
+    },
+    {
+      "type": "web_search_tool_result",
+      "tool_use_id": "srvtoolu_01WYG3ziw53XMcoyKL4XcZmE",
+      "content": [
+        {
+          "type": "web_search_result",
+          "url": "https://laravel.com/docs/13.x/releases",
+          "title": "Release Notes - Laravel 13.x",
+          "encrypted_content": "EqgfCioIARgBIiQ3YTAwMjY1Mi1mZjM5LTQ1NGUtODgxNC1kNjNjNTk1ZWI3Y...",
+          "page_age": "March 17, 2026"
+        }
+      ]
+    },
+    {
+      "type": "server_tool_use",
+      "id": "srvtoolu_01QrbZRk9zTPmzgVVGuRnSjX",
+      "name": "web_search",
+      "input": {
+        "query": "laravel 13 upgrade guide"
+      }
+    },
+    {
+      "type": "web_search_tool_result",
+      "tool_use_id": "srvtoolu_01QrbZRk9zTPmzgVVGuRnSjX",
+      "content": [
+        {
+          "type": "web_search_result",
+          "url": "https://laravel.com/docs/13.x/upgrade",
+          "title": "Upgrade Guide - Laravel 13.x",
+          "encrypted_content": "Eo8BCioIAhgBIiQyYjQ0OWJmZi1lNm..",
+          "page_age": "March 17, 2026"
+        }
+      ]
+    },
+    {
+      "type": "server_tool_use",
+      "id": "srvtoolu_01B4xTq8ZxR1u9nV8hJ3mYpK",
+      "name": "web_fetch",
+      "input": {
+        "url": "https://laravel.com/docs/13.x/releases"
+      }
+    },
+    {
+      "type": "web_fetch_tool_result",
+      "tool_use_id": "srvtoolu_01B4xTq8ZxR1u9nV8hJ3mYpK",
+      "content": {
+        "type": "web_fetch_result",
+        "url": "https://laravel.com/docs/13.x/releases",
+        "content": {
+          "type": "document",
+          "source": {
+            "type": "text",
+            "media_type": "text/plain",
+            "data": "Laravel 13 continues the improvements made in Laravel 12.x..."
+          },
+          "title": "Release Notes - Laravel 13.x"
+        },
+        "retrieved_at": "2026-10-15T09:12:44.000000+00:00"
+      }
+    },
+    {
+      "type": "text",
+      "text": "Laravel 13 was released in March 2026 and requires PHP 8.3 or later."
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 18240,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 812,
+    "server_tool_use": {
+      "web_search_requests": 2,
+      "web_fetch_requests": 1
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  }
+}

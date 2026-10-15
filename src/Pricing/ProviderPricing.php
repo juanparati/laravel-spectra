@@ -24,6 +24,17 @@ abstract class ProviderPricing implements Arrayable
     abstract public function provider(): string;
 
     /**
+     * ISO 4217 code of the currency this catalog's prices are written in.
+     *
+     * Costs are converted to `spectra.costs.currency` with the rates in
+     * `spectra.costs.exchange_rates` when the two differ.
+     */
+    public function currency(): string
+    {
+        return 'USD';
+    }
+
+    /**
      * Define the built-in models for this provider.
      *
      * Override in each provider pricing class to register models.
@@ -48,6 +59,8 @@ abstract class ProviderPricing implements Arrayable
      * Define per-tool-call pricing for this provider.
      *
      * Returns an associative array of tool call type => cost in cents per call.
+     * Keys match the output item types counted from the response (e.g.
+     * `web_search_call`) or the keys a handler reports in Metrics::$toolCalls.
      * Override in provider pricing classes that have separately-billed tool calls.
      *
      * @return array<string, float>
@@ -86,12 +99,13 @@ abstract class ProviderPricing implements Arrayable
     }
 
     /**
-     * @return array{provider: string, models: array<int, array{internal_name: string, model: array<string, mixed>, tiers: array<int, array<string, mixed>>}>}
+     * @return array{provider: string, currency: string, models: array<int, array{internal_name: string, model: array<string, mixed>, tiers: array<int, array<string, mixed>>}>}
      */
     public function toArray(): array
     {
         return [
             'provider' => $this->provider(),
+            'currency' => $this->currency(),
             'models' => array_map(fn (ModelDefinition $def) => [
                 'internal_name' => $def->getInternalName(),
                 'model' => $def->toModelArray(),

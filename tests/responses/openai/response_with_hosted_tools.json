@@ -1,0 +1,93 @@
+{
+  "id": "resp_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+  "object": "response",
+  "created_at": 1792051400,
+  "status": "completed",
+  "background": false,
+  "completed_at": 1792051433,
+  "error": null,
+  "incomplete_details": null,
+  "model": "gpt-5.4-2026-03-05",
+  "output": [
+    {
+      "id": "ws_01",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "query": "EU AI Act fines 2026"
+      }
+    },
+    {
+      "id": "ws_02",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "query": "EU AI Act enforcement dates"
+      }
+    },
+    {
+      "id": "fs_01",
+      "type": "file_search_call",
+      "status": "completed",
+      "queries": ["fine schedule"],
+      "results": null
+    },
+    {
+      "id": "ci_01",
+      "type": "code_interpreter_call",
+      "status": "completed",
+      "code": "import pandas as pd",
+      "container_id": "cntr_aaa111",
+      "outputs": null
+    },
+    {
+      "id": "ci_02",
+      "type": "code_interpreter_call",
+      "status": "completed",
+      "code": "df.describe()",
+      "container_id": "cntr_aaa111",
+      "outputs": null
+    },
+    {
+      "id": "ci_03",
+      "type": "code_interpreter_call",
+      "status": "completed",
+      "code": "print('second container')",
+      "container_id": "cntr_bbb222",
+      "outputs": null
+    },
+    {
+      "id": "msg_01",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "text": "Fines reach up to 7% of global turnover."
+        }
+      ],
+      "role": "assistant"
+    }
+  ],
+  "service_tier": "default",
+  "tools": [
+    {"type": "web_search"},
+    {"type": "file_search", "vector_store_ids": ["vs_123"]},
+    {"type": "code_interpreter", "container": {"type": "auto"}}
+  ],
+  "usage": {
+    "input_tokens": 2000,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens": 500,
+    "output_tokens_details": {
+      "reasoning_tokens": 120
+    },
+    "total_tokens": 2500
+  },
+  "metadata": {}
+}

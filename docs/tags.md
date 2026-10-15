@@ -37,16 +37,16 @@ Spectra::track('openai', 'gpt-4o', fn () => ..., [
 <a name="global-tags"></a>
 ## Global Tags
 
-Global tags are applied to **every** tracked request in the current process. This is useful for attaching environment-level context without explicitly tagging each individual request:
+Global tags are applied to **every** tracked request in the current request or queued job. They are reset between queued jobs and Octane requests. This is useful for attaching environment-level context without explicitly tagging each individual request:
 
 ```php
-// In a middleware or service provider
+// In a middleware or a queued job
 Spectra::addGlobalTags(['production', 'us-east-1', 'content-api']);
 
-// Every subsequent tracked request in this process will include these tags
+// Every later tracked request in this request or job will include these tags
 ```
 
-Global tags are merged with any request-specific tags. Clear global tags at the end of a middleware or process with:
+Global tags are merged with any request-specific tags. Clear global tags earlier, for example in a long-running command, with:
 
 ```php
 Spectra::clearGlobals();

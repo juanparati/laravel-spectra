@@ -1,0 +1,81 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "Spain won Euro 2024, beating England 2-1 in the final in Berlin on 14 July 2024."
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0,
+      "groundingMetadata": {
+        "searchEntryPoint": {
+          "renderedContent": "<style>.container { align-items: center; }</style><div class=\"container\">...</div>"
+        },
+        "groundingChunks": [
+          {
+            "web": {
+              "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AQXblrw1",
+              "title": "uefa.com"
+            }
+          },
+          {
+            "web": {
+              "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AQXblrw2",
+              "title": "bbc.com"
+            }
+          }
+        ],
+        "groundingSupports": [
+          {
+            "segment": {
+              "startIndex": 0,
+              "endIndex": 80,
+              "text": "Spain won Euro 2024, beating England 2-1 in the final in Berlin on 14 July 2024."
+            },
+            "groundingChunkIndices": [
+              0,
+              1
+            ]
+          }
+        ],
+        "webSearchQueries": [
+          "who won euro 2024",
+          "euro 2024 final score"
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 5000,
+    "candidatesTokenCount": 400,
+    "totalTokenCount": 7500,
+    "cachedContentTokenCount": 2000,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 5000
+      }
+    ],
+    "cacheTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 2000
+      }
+    ],
+    "toolUsePromptTokenCount": 1500,
+    "toolUsePromptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 1500
+      }
+    ],
+    "thoughtsTokenCount": 600,
+    "serviceTier": "standard"
+  },
+  "modelVersion": "gemini-2.5-flash",
+  "responseId": "Kq3vaJLEO5jD7M8Ph4yR8Ag"
+}

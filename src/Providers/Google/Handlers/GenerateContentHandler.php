@@ -12,12 +12,17 @@ use Spectra\Contracts\HasFinishReason;
 use Spectra\Contracts\MatchesResponseShape;
 use Spectra\Contracts\StreamsResponse;
 use Spectra\Data\Metrics;
-use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 use Spectra\Providers\Google\ExtractsModelFromGoogleEndpoint;
+use Spectra\Providers\Google\GeminiUsage;
 use Spectra\Providers\Google\Streaming\GenerateContentStreaming;
 use Spectra\Support\Tracking\StreamHandler;
 
+/**
+ * Gemini `generateContent` / `streamGenerateContent` text responses (the
+ * default handler for those endpoints; image and audio responses go to the
+ * specialist handlers).
+ */
 class GenerateContentHandler implements ExtractsModelFromRequest, ExtractsModelFromResponse, Handler, HasFinishReason, MatchesResponseShape, StreamsResponse
 {
     use ExtractsModelFromGoogleEndpoint;
@@ -37,18 +42,17 @@ class GenerateContentHandler implements ExtractsModelFromRequest, ExtractsModelF
     }
 
     /**
+     * Thinking and tool-use prompt tokens are reported beside the prompt and
+     * candidate counts and billed too; GeminiUsage folds them in.
+     *
      * @param  array<string, mixed>  $requestData
      * @param  array<string, mixed>  $responseData
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
         return new Metrics(
-            tokens: new TokenMetrics(
-                promptTokens: (int) ($responseData['usageMetadata']['promptTokenCount'] ?? 0),
-                completionTokens: (int) ($responseData['usageMetadata']['candidatesTokenCount'] ?? 0),
-                cachedTokens: (int) ($responseData['usageMetadata']['cachedContentTokenCount'] ?? 0),
-                reasoningTokens: (int) ($responseData['usageMetadata']['thoughtsTokenCount'] ?? 0),
-            ),
+            tokens: GeminiUsage::tokens(GeminiUsage::metadata($responseData)),
+            toolCalls: GeminiUsage::groundingCalls($responseData),
         );
     }
 
@@ -68,7 +72,8 @@ class GenerateContentHandler implements ExtractsModelFromRequest, ExtractsModelF
         $texts = [];
 
         foreach ($response['candidates'][0]['content']['parts'] as $part) {
-            if (isset($part['text']) && $part['text'] !== '') {
+            // Thought summaries are not part of the answer.
+            if (isset($part['text']) && $part['text'] !== '' && ! ($part['thought'] ?? false)) {
                 $texts[] = $part['text'];
             }
         }

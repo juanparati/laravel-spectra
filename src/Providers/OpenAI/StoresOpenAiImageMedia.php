@@ -7,6 +7,10 @@ namespace Spectra\Providers\OpenAI;
 use Illuminate\Support\Facades\Http;
 use Spectra\Support\MediaPersister;
 
+/**
+ * Summarises and stores the images of an Images API response (`data[]`
+ * with `b64_json` or a temporary `url`).
+ */
 trait StoresOpenAiImageMedia
 {
     /** @param  array<string, mixed>  $response */

@@ -1,0 +1,29 @@
+{
+    "id": "chatcmpl-4f1c2b9e8a7d4c3b",
+    "object": "chat.completion",
+    "created": 1760000000,
+    "model": "deepseek-v4.1-flash",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Bonjour ! Voici le résumé demandé.",
+                "tool_calls": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 10000,
+        "completion_tokens": 1500,
+        "total_tokens": 11500,
+        "prompt_tokens_details": {
+            "cached_tokens": 6000
+        },
+        "completion_tokens_details": {
+            "reasoning_tokens": 500
+        }
+    }
+}

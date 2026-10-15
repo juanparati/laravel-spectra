@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 
 /**
@@ -29,6 +30,9 @@ use Illuminate\Support\Carbon;
  * @property float $total_duration_seconds
  * @property int $total_input_characters
  * @property int $total_reasoning_tokens
+ * @property int $total_cached_tokens
+ * @property int $total_cache_write_tokens
+ * @property int $total_pages
  * @property float $total_cost_in_cents
  * @property int $total_latency_ms
  * @property int|null $min_latency_ms
@@ -72,6 +76,9 @@ class SpectraDailyStat extends Model
             'total_duration_seconds' => 'float',
             'total_input_characters' => 'integer',
             'total_reasoning_tokens' => 'integer',
+            'total_cached_tokens' => 'integer',
+            'total_cache_write_tokens' => 'integer',
+            'total_pages' => 'integer',
             'total_cost_in_cents' => 'float',
             'total_latency_ms' => 'integer',
             'min_latency_ms' => 'integer',
@@ -174,6 +181,11 @@ class SpectraDailyStat extends Model
         return $query->where('model_type', $modelType);
     }
 
+    /**
+     * Add one request to the day's stats.
+     *
+     * Kept for backwards compatibility; StatsAggregator now calls accumulate().
+     */
     public static function record(
         string $date,
         string $provider,
@@ -190,11 +202,66 @@ class SpectraDailyStat extends Model
         int $videoCount = 0,
         float $durationSeconds = 0,
         int $inputCharacters = 0,
-        int $reasoningTokens = 0
+        int $reasoningTokens = 0,
+        int $cachedTokens = 0,
+        int $cacheWriteTokens = 0,
+        int $pages = 0,
     ): void {
+        static::accumulate(
+            date: $date,
+            provider: $provider,
+            model: $model,
+            modelType: $modelType,
+            trackableType: $trackableType,
+            trackableId: $trackableId,
+            increments: [
+                'request_count' => 1,
+                'successful_count' => $successful ? 1 : 0,
+                'failed_count' => $successful ? 0 : 1,
+                'prompt_tokens' => $promptTokens,
+                'completion_tokens' => $completionTokens,
+                'total_tokens' => $promptTokens + $completionTokens,
+                'total_cached_tokens' => $cachedTokens,
+                'total_cache_write_tokens' => $cacheWriteTokens,
+                'total_images' => $imageCount,
+                'total_videos' => $videoCount,
+                'total_pages' => $pages,
+                'total_duration_seconds' => $durationSeconds,
+                'total_input_characters' => $inputCharacters,
+                'total_reasoning_tokens' => $reasoningTokens,
+                'total_cost_in_cents' => $cost,
+                'total_latency_ms' => $latencyMs ?? 0,
+            ],
+            latencyMs: $latencyMs,
+        );
+    }
+
+    /**
+     * Add the given amounts to one day/provider/model/trackable row, creating
+     * it first when needed. Amounts may be negative to move a request between
+     * the successful and failed counts.
+     *
+     * @param  array<string, int|float>  $increments
+     */
+    public static function accumulate(
+        string $date,
+        string $provider,
+        string $model,
+        ?string $modelType,
+        ?string $trackableType,
+        string|int|null $trackableId,
+        array $increments,
+        ?int $latencyMs = null,
+    ): void {
+        $increments = array_filter($increments, fn (int|float $value) => $value != 0);
+
+        if ($increments === [] && $latencyMs === null) {
+            return;
+        }
+
         $trackableIdStr = $trackableId !== null ? (string) $trackableId : null;
 
-        $stat = static::query()
+        $find = fn () => static::query()
             ->whereDate('date', $date)
             ->where('provider', $provider)
             ->where('model', $model)
@@ -210,66 +277,33 @@ class SpectraDailyStat extends Model
             )
             ->first();
 
+        $stat = $find();
+
         if ($stat === null) {
-            $stat = static::create([
-                'date' => $date,
-                'provider' => $provider,
-                'model' => $model,
-                'model_type' => $modelType,
-                'trackable_type' => $trackableType,
-                'trackable_id' => $trackableIdStr,
-                'request_count' => 0,
-                'successful_count' => 0,
-                'failed_count' => 0,
-                'prompt_tokens' => 0,
-                'completion_tokens' => 0,
-                'total_tokens' => 0,
-                'total_images' => 0,
-                'total_videos' => 0,
-                'total_duration_seconds' => 0,
-                'total_input_characters' => 0,
-                'total_reasoning_tokens' => 0,
-                'total_cost_in_cents' => 0,
-                'total_latency_ms' => 0,
-            ]);
-        }
-
-        $promptTokens = max(0, $promptTokens);
-        $completionTokens = max(0, $completionTokens);
-        $reasoningTokens = max(0, $reasoningTokens);
-        $imageCount = max(0, $imageCount);
-        $videoCount = max(0, $videoCount);
-        $durationSeconds = max(0, $durationSeconds);
-        $inputCharacters = max(0, $inputCharacters);
-        $cost = max(0, $cost);
-
-        $increments = [
-            'request_count' => 1,
-            'successful_count' => $successful ? 1 : 0,
-            'failed_count' => $successful ? 0 : 1,
-            'prompt_tokens' => $promptTokens,
-            'completion_tokens' => $completionTokens,
-            'total_tokens' => $promptTokens + $completionTokens,
-            'total_images' => $imageCount,
-            'total_videos' => $videoCount,
-            'total_duration_seconds' => $durationSeconds,
-            'total_input_characters' => $inputCharacters,
-            'total_reasoning_tokens' => $reasoningTokens,
-            'total_cost_in_cents' => $cost,
-        ];
-
-        if ($latencyMs !== null) {
-            $latencyMs = max(0, $latencyMs);
-            $increments['total_latency_ms'] = $latencyMs;
+            try {
+                $stat = static::create([
+                    'date' => $date,
+                    'provider' => $provider,
+                    'model' => $model,
+                    'model_type' => $modelType,
+                    'trackable_type' => $trackableType,
+                    'trackable_id' => $trackableIdStr,
+                ]);
+            } catch (UniqueConstraintViolationException) {
+                // Another worker created the row between our read and insert.
+                $stat = $find() ?? throw new \RuntimeException('Spectra daily stat row disappeared during insert.');
+            }
         }
 
         $key = $stat->getKey();
 
-        static::query()
-            ->whereKey($key)
-            ->incrementEach($increments);
+        if ($increments !== []) {
+            static::query()->whereKey($key)->incrementEach($increments);
+        }
 
         if ($latencyMs !== null) {
+            $latencyMs = max(0, $latencyMs);
+
             static::query()
                 ->whereKey($key)
                 ->where(fn (Builder $q) => $q->whereNull('min_latency_ms')->orWhere('min_latency_ms', '>', $latencyMs))
@@ -324,6 +358,9 @@ class SpectraDailyStat extends Model
             SUM(total_duration_seconds) as total_duration_seconds,
             SUM(total_input_characters) as total_input_characters,
             SUM(total_reasoning_tokens) as total_reasoning_tokens,
+            SUM(total_cached_tokens) as total_cached_tokens,
+            SUM(total_cache_write_tokens) as total_cache_write_tokens,
+            SUM(total_pages) as total_pages,
             SUM(total_cost_in_cents) as total_cost_in_cents,
             SUM(total_latency_ms) as total_latency_ms,
             MIN(min_latency_ms) as min_latency_ms,
@@ -349,6 +386,9 @@ class SpectraDailyStat extends Model
             'total_duration_seconds' => (float) ($stats->total_duration_seconds ?? 0),
             'total_input_characters' => (int) ($stats->total_input_characters ?? 0),
             'total_reasoning_tokens' => (int) ($stats->total_reasoning_tokens ?? 0),
+            'total_cached_tokens' => (int) ($stats->total_cached_tokens ?? 0),
+            'total_cache_write_tokens' => (int) ($stats->total_cache_write_tokens ?? 0),
+            'total_pages' => (int) ($stats->total_pages ?? 0),
             'total_cost_in_cents' => (float) ($stats->total_cost_in_cents ?? 0),
             'total_cost' => (float) ($stats->total_cost_in_cents ?? 0) / 100,
             'avg_latency_ms' => $totalRequests > 0

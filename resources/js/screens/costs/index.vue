@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { useHelpers } from '@/composables/useHelpers';
 import { usePeriodQuery } from '@/composables/usePeriodQuery';
 import { useProviders } from '@/composables/useProviders';
@@ -8,9 +8,10 @@ import { useLoading } from '@/composables/useLoading';
 import Skeleton from '@/components/Skeleton.vue';
 import PageRangeHeader from '@/components/PageRangeHeader.vue';
 import ProviderLogo from '@/components/ProviderLogo.vue';
+import StatCard from '@/components/StatCard.vue';
 
-const { formatNumber, formatCurrency, currencySymbol, providerChartColor, apiRequest } = useHelpers();
-const { period, startDate, endDate, applyQueryState, buildQueryParams, syncQueryToRouter } = usePeriodQuery();
+const { formatNumber, formatCompact, formatCurrency, formatShortDate, currencySymbol, providerChartColor, seriesColor, apiRequest } = useHelpers();
+const { period, startDate, endDate, periodLabel, applyQueryState, buildQueryParams, syncQueryToRouter } = usePeriodQuery();
 const { providers, loadProviders, providerDisplayName } = useProviders();
 const { createLineChart, createDoughnutChart } = useCharts();
 const loading = useLoading();
@@ -38,6 +39,8 @@ const loadStats = async () => {
     try {
         const data = await apiRequest('get', '/costs?' + buildQueryParams().toString());
         stats.value = data;
+        // Draw once the chart containers are visible, so they get a real size.
+        loading.value = false;
         await nextTick();
         renderCharts();
     } catch (error) {
@@ -60,12 +63,19 @@ const renderCostChart = () => {
     const data = stats.value.costs_by_date || [];
 
     costChart = createLineChart(costChartRef.value, {
-        labels: data.map(d => d.date),
-        values: data.map(d => d.cost / 100),
+        labels: data.map(d => formatShortDate(d.date)),
+        values: data.map(d => Number(d.cost) / 100),
     }, {
         label: 'Cost',
         yTicks: {
-            callback: (value) => currencySymbol + value.toFixed(2),
+            callback: (value) => currencySymbol + Number(value).toFixed(2),
+        },
+        chartOptions: {
+            aspectRatio: 2.6,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: (context) => ' ' + formatCurrency(context.raw * 100) } },
+            },
         },
     });
 };
@@ -77,11 +87,11 @@ const renderProviderChart = () => {
     const data = stats.value.costs_by_provider || [];
 
     providerChart = createDoughnutChart(providerChartRef.value, {
-        labels: data.map(d => d.provider),
-        values: data.map(d => d.cost),
-        colors: data.map(d => providerChartColor(d.provider)),
+        labels: data.map(d => providerDisplayName(d.provider)),
+        values: data.map(d => Number(d.cost)),
+        colors: () => data.map(d => providerChartColor(d.provider)),
     }, {
-        type: 'pie',
+        legend: false,
         tooltipCallbacks: {
             label: (context) => {
                 return context.label + ': ' + formatCurrency(context.raw);
@@ -98,9 +108,10 @@ const renderModelTypeChart = () => {
 
     modelTypeChart = createDoughnutChart(modelTypeChartRef.value, {
         labels: data.map(d => d.label || d.model_type),
-        values: data.map(d => d.cost),
+        values: data.map(d => Number(d.cost)),
+        colors: () => data.map((d, index) => seriesColor(index)),
     }, {
-        type: 'pie',
+        legend: false,
         tooltipCallbacks: {
             label: (context) => {
                 return context.label + ': ' + formatCurrency(context.raw);
@@ -139,25 +150,43 @@ const onRangeChange = async () => {
     await loadStats();
 };
 
-// Watch for dark mode changes to re-render charts
-const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-        if (mutation.attributeName === 'class') {
-            renderCharts();
-        }
-    });
+const totalCost = computed(() => Number(stats.value.total_cost_in_cents || 0));
+
+// Legend rows for the breakdown doughnut, with amounts and shares.
+const breakdownRows = computed(() => {
+    const byProvider = breakdownTab.value === 'provider';
+    const rows = byProvider ? (stats.value.costs_by_provider || []) : (stats.value.costs_by_model_type || []);
+    const total = rows.reduce((sum, row) => sum + Number(row.cost || 0), 0) || 1;
+
+    return rows.map((row, index) => ({
+        key: byProvider ? row.provider : (row.model_type || row.label),
+        label: byProvider ? providerDisplayName(row.provider) : (row.label || row.model_type),
+        provider: byProvider ? row.provider : null,
+        cost: Number(row.cost || 0),
+        share: (Number(row.cost || 0) / total) * 100,
+        color: byProvider ? providerChartColor(row.provider) : seriesColor(index),
+    }));
 });
+
+const topProvider = computed(() => [...(stats.value.costs_by_provider || [])].sort((a, b) => Number(b.cost) - Number(a.cost))[0] || null);
+const topModel = computed(() => [...(stats.value.costs_by_model || [])].sort((a, b) => Number(b.cost) - Number(a.cost))[0] || null);
+const modelCostMax = computed(() => Math.max(1, ...(stats.value.costs_by_model || []).map((m) => Number(m.cost || 0))));
+const dailyAverage = computed(() => {
+    const days = (stats.value.costs_by_date || []).length;
+
+    return days ? totalCost.value / days : 0;
+});
+
+const initials = (name) => String(name || 'U').split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 
 onMounted(async () => {
     applyQueryState();
     await syncQueryToRouter(null, true);
     await loadProviders();
     await loadStats();
-    observer.observe(document.documentElement, { attributes: true });
 });
 
 onUnmounted(() => {
-    observer.disconnect();
     if (costChart) costChart.destroy();
     if (providerChart) providerChart.destroy();
     if (modelTypeChart) modelTypeChart.destroy();
@@ -165,10 +194,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="">
-        <!-- Header -->
+    <div>
         <PageRangeHeader
-            title="Cost Analysis"
+            title="Costs"
+            :subtitle="`Where the money goes · ${periodLabel}`"
             v-model:period="period"
             v-model:start-date="startDate"
             v-model:end-date="endDate"
@@ -176,72 +205,108 @@ onUnmounted(() => {
             @change="onRangeChange"
         />
 
+        <!-- Headline numbers -->
+        <div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Total spend" :loading="loading" skeleton-width="70%">
+                <div class="stat-value">{{ formatCurrency(totalCost) }}</div>
+                <template #footer>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ formatCurrency(dailyAverage) }} per day on average</div>
+                </template>
+            </StatCard>
+            <StatCard label="Top provider" :loading="loading">
+                <div class="mt-1.5 flex items-center gap-2">
+                    <ProviderLogo
+                        v-if="topProvider"
+                        :provider="topProvider.provider"
+                        class="inline-flex h-5 w-5 items-center text-gray-700 dark:text-gray-200 [&>svg]:h-full [&>svg]:w-full"
+                    />
+                    <span class="truncate text-xl font-semibold tracking-tight text-gray-900 dark:text-white">{{ topProvider ? providerDisplayName(topProvider.provider) : '—' }}</span>
+                </div>
+                <template #footer>
+                    <div v-if="topProvider" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                        {{ formatCurrency(topProvider.cost) }} · {{ totalCost ? ((Number(topProvider.cost) / totalCost) * 100).toFixed(0) : 0 }}% of spend
+                    </div>
+                </template>
+            </StatCard>
+            <StatCard label="Top model" :loading="loading">
+                <div class="mt-1.5 truncate text-xl font-semibold tracking-tight text-gray-900 dark:text-white" :title="topModel?.model">{{ topModel?.model || '—' }}</div>
+                <template #footer>
+                    <div v-if="topModel" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                        {{ formatCurrency(topModel.cost) }} across {{ formatNumber(topModel.requests) }} requests
+                    </div>
+                </template>
+            </StatCard>
+            <StatCard label="Models used" :loading="loading">
+                <div class="stat-value">{{ formatNumber((stats.costs_by_model || []).length) }}</div>
+                <template #footer>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">From {{ formatNumber((stats.costs_by_provider || []).length) }} providers</div>
+                </template>
+            </StatCard>
+        </div>
+
         <!-- Charts -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-            <div class="lg:col-span-2 card">
+        <div class="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div class="card lg:col-span-2">
                 <div class="card-header">
-                    <h3 class="text-sm font-medium">Cost Over Time</h3>
+                    <div>
+                        <h3>Spend over time</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Daily cost</p>
+                    </div>
                 </div>
                 <div class="card-body">
                     <template v-if="loading">
-                        <Skeleton variant="chart" height="200px" />
+                        <Skeleton variant="chart" height="240px" />
                     </template>
-                    <canvas v-show="!loading" ref="costChartRef" height="100"></canvas>
+                    <canvas v-show="!loading" ref="costChartRef"></canvas>
                 </div>
             </div>
-            <div class="card">
-                <div class="card-header flex-wrap gap-3">
+
+            <div class="card flex flex-col">
+                <div class="card-header">
                     <div>
-                        <h3 class="text-sm font-semibold">Cost Breakdown</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Distribution view</p>
+                        <h3>Breakdown</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Share of spend</p>
                     </div>
-                    <div class="inline-flex items-center p-1 rounded-lg bg-gray-100 dark:bg-gray-700/60">
-                        <button
-                            @click="breakdownTab = 'provider'"
-                            :class="[
-                                'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
-                                breakdownTab === 'provider'
-                                    ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
-                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
-                            ]"
-                        >
-                            By Provider
-                        </button>
-                        <button
-                            @click="breakdownTab = 'model-type'"
-                            :class="[
-                                'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
-                                breakdownTab === 'model-type'
-                                    ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
-                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
-                            ]"
-                        >
-                            By Model Type
-                        </button>
+                    <div class="segmented">
+                        <button type="button" :class="{ 'is-active': breakdownTab === 'provider' }" @click="breakdownTab = 'provider'">Provider</button>
+                        <button type="button" :class="{ 'is-active': breakdownTab === 'model-type' }" @click="breakdownTab = 'model-type'">Type</button>
                     </div>
                 </div>
-                <div class="card-body">
-                    <template v-if="loading">
-                        <div class="flex items-center justify-center" style="height: 200px">
-                            <div class="w-32 h-32 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
-                        </div>
-                    </template>
-                    <div v-show="!loading && breakdownTab === 'provider'">
-                        <canvas ref="providerChartRef" height="200"></canvas>
+                <div class="card-body flex flex-1 flex-col gap-5">
+                    <div v-if="loading" class="flex h-40 items-center justify-center">
+                        <div class="h-32 w-32 animate-pulse rounded-full bg-gray-100 dark:bg-gray-800"></div>
                     </div>
-                    <div v-show="!loading && breakdownTab === 'model-type'">
-                        <canvas ref="modelTypeChartRef" height="200"></canvas>
+                    <div v-show="!loading" class="mx-auto w-40">
+                        <div v-show="breakdownTab === 'provider'"><canvas ref="providerChartRef"></canvas></div>
+                        <div v-show="breakdownTab === 'model-type'"><canvas ref="modelTypeChartRef"></canvas></div>
                     </div>
+                    <ul v-if="!loading" class="space-y-2 text-sm">
+                        <li v-for="row in breakdownRows" :key="row.key" class="flex items-center gap-2.5">
+                            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" :style="{ backgroundColor: row.color }" aria-hidden="true"></span>
+                            <ProviderLogo
+                                v-if="row.provider"
+                                :provider="row.provider"
+                                class="inline-flex h-3.5 w-3.5 shrink-0 items-center text-gray-500 dark:text-gray-400 [&>svg]:h-full [&>svg]:w-full"
+                                aria-hidden="true"
+                            />
+                            <span class="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-300">{{ row.label }}</span>
+                            <span class="tabular-nums text-gray-900 dark:text-white">{{ formatCurrency(row.cost) }}</span>
+                            <span class="w-12 text-right tabular-nums text-xs text-gray-500 dark:text-gray-400">{{ row.share.toFixed(1) }}%</span>
+                        </li>
+                        <li v-if="!breakdownRows.length" class="py-6 text-center text-gray-500 dark:text-gray-400">No spend in this period</li>
+                    </ul>
                 </div>
             </div>
         </div>
 
         <!-- Tables -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <!-- Cost by Model -->
-            <div class="card">
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-5">
+            <div class="card overflow-hidden lg:col-span-3">
                 <div class="card-header">
-                    <h3 class="text-sm font-medium">Cost by Model</h3>
+                    <div>
+                        <h3>Cost by model</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Highest spend first</p>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="table">
@@ -255,42 +320,36 @@ onUnmounted(() => {
                         </thead>
                         <tbody>
                             <template v-if="loading">
-                                <tr v-for="i in 5" :key="i" class="border-b border-gray-100 dark:border-gray-700/50">
-                                    <td class="px-5 py-4"><div class="h-4 w-28 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div></td>
-                                    <td class="px-5 py-4"><div class="h-4 w-12 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                    <td class="px-5 py-4"><div class="h-4 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                    <td class="px-5 py-4"><div class="h-4 w-14 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                </tr>
+                                <Skeleton variant="table-row" :lines="5" />
                             </template>
                             <template v-else>
-                                <tr v-for="model in stats.costs_by_model" :key="model.model + ':' + (model.model_type || 'text')">
-                                    <td>
-                                        <div class="flex items-center gap-2 min-w-0">
+                                <tr v-for="model in stats.costs_by_model" :key="model.provider + model.model + ':' + (model.model_type || 'text')">
+                                    <td class="max-w-0 w-1/2">
+                                        <div class="flex min-w-0 items-center gap-2.5">
                                             <ProviderLogo
                                                 :provider="model.provider"
                                                 :title="providerDisplayName(model.provider)"
-                                                class="inline-flex items-center shrink-0 w-4 h-4 [&>svg]:w-full [&>svg]:h-full text-gray-500 dark:text-gray-400"
+                                                class="inline-flex h-4 w-4 shrink-0 items-center text-gray-500 dark:text-gray-400 [&>svg]:h-full [&>svg]:w-full"
                                                 aria-hidden="true"
                                             />
-                                            <span class="font-medium text-gray-900 dark:text-white truncate" :title="model.model">{{ model.model }}</span>
-                                            <span
-                                                v-if="model.model_type"
-                                                class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 shrink-0"
-                                            >{{ model.model_type }}</span>
+                                            <div class="min-w-0 flex-1">
+                                                <div class="flex min-w-0 items-center gap-1.5">
+                                                    <span class="truncate font-medium text-gray-900 dark:text-white" :title="model.model">{{ model.model }}</span>
+                                                    <span v-if="model.model_type && model.model_type !== 'text'" class="badge badge-secondary shrink-0">{{ model.model_type }}</span>
+                                                </div>
+                                                <div class="mt-1.5 h-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                                                    <div class="h-full rounded-full bg-primary-500/70" :style="{ width: (Number(model.cost) / modelCostMax) * 100 + '%' }"></div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </td>
                                     <td class="text-right tabular-nums">{{ formatNumber(model.requests) }}</td>
-                                    <td class="text-right tabular-nums">{{ formatUsage(model) }}</td>
+                                    <td class="whitespace-nowrap text-right tabular-nums text-gray-500 dark:text-gray-400">{{ formatUsage(model) }}</td>
                                     <td class="text-right tabular-nums font-medium text-gray-900 dark:text-white">{{ formatCurrency(model.cost) }}</td>
                                 </tr>
                                 <tr v-if="!stats.costs_by_model?.length">
                                     <td colspan="4">
-                                        <div class="empty-state py-12">
-                                            <svg class="empty-state-icon mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                            <p class="empty-state-title">No data available</p>
-                                        </div>
+                                        <div class="empty-state"><p class="empty-state-title">No spend in this period</p></div>
                                     </td>
                                 </tr>
                             </template>
@@ -299,10 +358,13 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <!-- Cost by User -->
-            <div class="card">
+            <div class="card overflow-hidden lg:col-span-2">
                 <div class="card-header">
-                    <h3 class="text-sm font-medium">Top Users by Cost</h3>
+                    <div>
+                        <h3>Top users</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">By spend</p>
+                    </div>
+                    <router-link :to="{ name: 'trackables' }" class="text-xs font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400">All trackables</router-link>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="table">
@@ -315,20 +377,16 @@ onUnmounted(() => {
                         </thead>
                         <tbody>
                             <template v-if="loading">
-                                <tr v-for="i in 5" :key="i" class="border-b border-gray-100 dark:border-gray-700/50">
-                                    <td class="px-5 py-4"><div class="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div></td>
-                                    <td class="px-5 py-4"><div class="h-4 w-12 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                    <td class="px-5 py-4"><div class="h-4 w-14 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                </tr>
+                                <Skeleton variant="table-row" :lines="5" />
                             </template>
                             <template v-else>
                                 <tr v-for="user in stats.costs_by_user" :key="user.user_id">
-                                    <td class="font-medium text-gray-900 dark:text-white">
-                                        <div class="flex items-center gap-3">
-                                            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
-                                                {{ (user.user_name || 'U')[0].toUpperCase() }}
+                                    <td class="whitespace-nowrap">
+                                        <div class="flex min-w-0 items-center gap-2.5">
+                                            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[11px] font-semibold text-gray-600 ring-1 ring-inset ring-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700">
+                                                {{ initials(user.user_name) }}
                                             </div>
-                                            <span>{{ user.user_name || 'User #' + user.user_id }}</span>
+                                            <span class="truncate font-medium text-gray-900 dark:text-white">{{ user.user_name || 'User #' + user.user_id }}</span>
                                         </div>
                                     </td>
                                     <td class="text-right tabular-nums">{{ formatNumber(user.requests) }}</td>
@@ -336,12 +394,7 @@ onUnmounted(() => {
                                 </tr>
                                 <tr v-if="!stats.costs_by_user?.length">
                                     <td colspan="3">
-                                        <div class="empty-state py-12">
-                                            <svg class="empty-state-icon mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                                            </svg>
-                                            <p class="empty-state-title">No user data available</p>
-                                        </div>
+                                        <div class="empty-state"><p class="empty-state-title">No user spend yet</p></div>
                                     </td>
                                 </tr>
                             </template>
@@ -350,6 +403,5 @@ onUnmounted(() => {
                 </div>
             </div>
         </div>
-
     </div>
 </template>

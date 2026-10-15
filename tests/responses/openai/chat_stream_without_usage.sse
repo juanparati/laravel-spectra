@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl-DQstream01","object":"chat.completion.chunk","created":1792051900,"model":"gpt-5.4-mini","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"logprobs":null,"finish_reason":null}],"obfuscation":"Xy3"}
+
+data: {"id":"chatcmpl-DQstream01","object":"chat.completion.chunk","created":1792051900,"model":"gpt-5.4-mini","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"Hi"},"logprobs":null,"finish_reason":null}],"obfuscation":"Xy3"}
+
+data: {"id":"chatcmpl-DQstream01","object":"chat.completion.chunk","created":1792051900,"model":"gpt-5.4-mini","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}],"obfuscation":"Xy3"}
+
+data: [DONE]
+

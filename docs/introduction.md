@@ -22,10 +22,10 @@ You can also add support for additional providers by creating a custom provider 
 
 - **Automatic tracking** &mdash; Watchers intercept Laravel HTTP client and OpenAI PHP SDK requests with zero code changes. Guzzle middleware provides an additional integration point for direct Guzzle usage.
 - **Multimodal support** &mdash; Track text completions, embeddings, image generation, video generation, text-to-speech, and speech-to-text across all major providers.
-- **Cost calculation** &mdash; A built-in pricing catalog with support for token-based, per-image, per-video, per-minute, per-second, and per-character pricing. Multiple pricing tiers (standard, batch, flex, priority) are supported per model.
+- **Cost calculation** &mdash; A built-in pricing catalog with token-based (including prompt-cache reads and writes, reasoning, audio, and image tokens), per-image, per-megapixel, per-video, per-minute, per-second, per-character, per-page, and per-request pricing. Multiple pricing tiers (standard, batch, flex, priority, fast, ultrafast) are supported per model, as well as long-context prices, dated prices, and catalogs in other currencies.
 - **Budget enforcement** &mdash; Define cost, token, and request-count limits per user, team, or any Eloquent model. Enforce budgets via middleware with hard blocks or soft warning events.
 - **Real-time dashboard** &mdash; A built-in SPA with request exploration, cost analysis, and per-user analytics.
-- **Streaming support** &mdash; Track SSE streaming responses with time-to-first-token metrics and full token accounting, including streamed image generation via OpenAI's Responses API.
+- **Streaming support** &mdash; Streamed responses are tracked automatically as your code reads them, with time-to-first-token metrics and full token accounting, including streamed image generation via OpenAI's Responses API.
 - **Media persistence** &mdash; Automatically download and store generated images and videos to any Laravel filesystem disk before provider URLs expire.
 - **Tags and metadata** &mdash; Attach custom labels and structured metadata to any request for filtering and grouping in the dashboard.
 - **User attribution** &mdash; Automatically associate requests with the authenticated user or manually assign them to any Eloquent model.

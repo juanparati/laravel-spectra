@@ -17,15 +17,14 @@ import Breadcrumb from '@/components/Breadcrumb.vue';
 import ProviderLogo from '@/components/ProviderLogo.vue';
 
 const route = useRoute();
-const { spectra, formatNumber, formatCurrency, formatDuration, statusClass, providerClass, apiRequest } = useHelpers();
+const { spectra, formatNumber, formatCurrency, formatDuration, apiRequest } = useHelpers();
 const loading = useLoading();
 
 const request = ref(null);
 loading.value = true;
 const activeTab = ref('response');
 const metricsExpanded = ref(true);
-const payloadExpanded = ref(false);
-const metadataExpanded = ref(false);
+const payloadExpanded = ref(true);
 
 const loadRequest = async () => {
     try {
@@ -67,6 +66,18 @@ const copyToClipboard = async (text, field) => {
     setTimeout(() => copiedField.value = null, 2000);
 };
 
+const isFailed = computed(() => !request.value?.status_code || request.value.status_code >= 400);
+
+const finishReasonClass = computed(() => {
+    const reason = request.value?.finish_reason;
+    if (['length', 'max_tokens', 'max_output_tokens', 'incomplete'].includes(reason)) return 'badge-warning';
+    if (['stop', 'end_turn', 'STOP', 'completed'].includes(reason)) return 'badge-success';
+    if (['refusal', 'content_filter', 'failed', 'SAFETY'].includes(reason)) return 'badge-danger';
+    return 'badge-secondary';
+});
+
+const formatToolName = (type) => String(type).replace(/_/g, ' ');
+
 const breadcrumbs = computed(() => [
     { label: 'Requests', to: { name: 'requests' } },
     { label: request.value?.model || `Request #${route.params.id}` },
@@ -78,311 +89,218 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="">
-        <!-- Breadcrumb -->
+    <div>
         <Breadcrumb :items="breadcrumbs" />
 
-        <!-- Header -->
-        <div class="mb-6 flex items-center justify-between">
-            <h1 class="text-xl font-bold text-gray-900 dark:text-white">Request Details</h1>
-            <div v-if="loading">
-                <div class="h-6 w-20 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse"></div>
-            </div>
-            <div v-else-if="request">
-                <StatusCode :code="request.status_code" />
-            </div>
-        </div>
-
-        <!-- Loading State -->
+        <!-- Loading -->
         <div v-if="loading">
-            <!-- Stats skeleton -->
-            <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
+            <div class="mb-6 h-8 w-72 animate-pulse rounded-lg bg-gray-200 dark:bg-gray-800"></div>
+            <div class="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <div v-for="i in 4" :key="i" class="stat-card">
-                    <div class="h-3 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-3"></div>
-                    <div class="h-7 w-28 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                    <div class="mb-3 h-3 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800"></div>
+                    <div class="h-7 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-800"></div>
                 </div>
             </div>
-            <!-- Content skeleton -->
-            <div class="card mb-6">
-                <div class="card-header">
-                    <div class="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
-                </div>
-                <div class="card-body">
-                    <Skeleton variant="chart" height="150px" />
-                </div>
-            </div>
+            <div class="card"><div class="card-body"><Skeleton variant="chart" height="160px" /></div></div>
         </div>
 
-        <div v-else-if="request" class="space-y-6">
-            <!-- Overview -->
-            <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                <div class="stat-card">
-                    <div class="stat-label">Provider</div>
-                    <div class="mt-1 flex items-center gap-2">
+        <div v-else-if="request">
+            <!-- Header -->
+            <div class="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div class="flex min-w-0 items-start gap-3.5">
+                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white shadow-card dark:border-gray-800 dark:bg-gray-900">
                         <ProviderLogo
                             :provider="request.provider"
-                            class="inline-flex items-center w-5 h-5 [&>svg]:w-full [&>svg]:h-full text-gray-500 dark:text-gray-400 shrink-0"
+                            class="inline-flex h-5 w-5 items-center text-gray-700 dark:text-gray-200 [&>svg]:h-full [&>svg]:w-full"
                         />
-                        <span class="stat-value text-lg">{{ request.provider_display_name || request.provider }}</span>
+                    </div>
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h1 class="truncate text-xl font-semibold tracking-tight text-gray-900 dark:text-white" :title="request.model">{{ request.model }}</h1>
+                            <span class="badge badge-secondary">{{ modelTypeLabel }}</span>
+                            <span v-if="request.is_streaming" class="badge badge-purple">Streamed</span>
+                            <span v-if="request.pricing_tier && request.pricing_tier !== 'standard'" class="badge badge-info capitalize">{{ request.pricing_tier }}</span>
+                            <span v-if="request.is_reasoning" class="badge badge-secondary">Reasoning{{ request.reasoning_effort ? ' · ' + request.reasoning_effort : '' }}</span>
+                        </div>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                            {{ request.provider_display_name || request.provider }}
+                            <template v-if="request.snapshot && request.snapshot !== request.model"> · <span class="font-mono text-xs">{{ request.snapshot }}</span></template>
+                            · {{ request.formatted_created_at }}
+                        </p>
                     </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-label">Model</div>
-                    <div class="mt-1 flex items-center gap-2 min-w-0">
-                        <span
-                            class="stat-value text-lg flex-1 min-w-0 truncate"
-                            :title="request.model"
-                        >{{ request.model }}</span>
-                        <span
-                            v-if="request.model_type"
-                            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 shrink-0"
-                        >{{ modelTypeLabel }}</span>
-                        <span
-                            v-if="request.is_streaming"
-                            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400 shrink-0"
-                            title="Streaming"
-                        >
-                            <svg class="w-3 h-3 mr-0.5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M6.26,19.089A9.625,9.625,0,0,1,6.234,4.911C6.709,4.475,6,3.769,5.527,4.2A10.516,10.516,0,0,0,5.553,19.8c.475.433,1.184-.273.707-.707Z"/>
-                                <path d="M8.84,15.706a5.024,5.024,0,0,1-.014-7.412c.474-.437-.234-1.143-.707-.707a6.028,6.028,0,0,0,.014,8.826c.474.434,1.183-.272.707-.707Z"/>
-                                <circle cx="12" cy="12" r="1.244"/>
-                                <path d="M17.74,4.911a9.625,9.625,0,0,1,.026,14.178c-.475.436.234,1.142.707.707A10.516,10.516,0,0,0,18.447,4.2c-.475-.433-1.184.273-.707.707Z"/>
-                                <path d="M15.16,8.294a5.024,5.024,0,0,1,.014,7.412c-.474.437.234,1.143.707.707a6.028,6.028,0,0,0-.014-8.826c-.474-.434-1.183.272-.707.707Z"/>
-                            </svg>
-                            Stream
-                        </span>
-                    </div>
-                </div>
+                <StatusCode :code="request.status_code" class="self-start" />
+            </div>
+
+            <!-- Summary -->
+            <div class="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <div class="stat-card">
                     <div class="stat-label">Cost</div>
-                    <div class="mt-1 flex items-center gap-2">
-                        <span class="stat-value text-lg">{{ formatCurrency(request.total_cost_in_cents) }}</span>
-                        <span
-                            v-if="request.pricing_tier"
-                            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
-                        >{{ request.pricing_tier }}</span>
+                    <div class="stat-value !text-2xl">{{ formatCurrency(request.total_cost_in_cents) }}</div>
+                    <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <template v-if="request.prompt_cost || request.completion_cost">
+                            In {{ formatCurrency(request.prompt_cost) }} · Out {{ formatCurrency(request.completion_cost) }}
+                        </template>
+                        <template v-else>{{ request.currency || 'USD' }}<span v-if="request.pricing_tier"> · {{ request.pricing_tier }} tier</span></template>
                     </div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Latency</div>
-                    <div class="mt-1 flex items-center gap-1.5 flex-wrap">
-                        <span class="stat-value text-lg">{{ formatDuration(request.latency_ms) }}</span>
-                        <template v-if="request.tokens_per_second != null">
-                            <span class="text-gray-300 dark:text-gray-600">/</span>
-                            <span class="text-sm text-gray-600 dark:text-gray-400" :title="'Tokens per second'">
-                                <span class="font-medium">{{ request.tokens_per_second }}</span><span class="text-xs text-gray-400 dark:text-gray-500 ml-0.5">tok/s</span>
-                            </span>
+                    <div class="stat-value !text-2xl">{{ formatDuration(request.latency_ms) }}</div>
+                    <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <template v-if="request.time_to_first_token_ms != null">First token in {{ formatDuration(request.time_to_first_token_ms) }}</template>
+                        <template v-else>End to end</template>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Tokens</div>
+                    <div class="stat-value !text-2xl">{{ formatNumber(request.total_tokens) }}</div>
+                    <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {{ formatNumber(request.prompt_tokens) }} in · {{ formatNumber(request.completion_tokens) }} out
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Throughput</div>
+                    <div class="stat-value !text-2xl">
+                        <template v-if="request.tokens_per_second != null">{{ request.tokens_per_second }}<span class="ml-1 text-sm font-medium text-gray-400">tok/s</span></template>
+                        <template v-else>—</template>
+                    </div>
+                    <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ request.is_streaming ? 'Measured from the stream' : 'Streamed requests only' }}</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <div class="min-w-0 space-y-6 lg:col-span-2">
+                    <!-- Error -->
+                    <div v-if="request.error_message || isFailed" class="card overflow-hidden border-red-200 dark:border-red-900/60">
+                        <div class="card-header border-red-100 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/30">
+                            <h3 class="flex items-center gap-2 !text-red-700 dark:!text-red-300">
+                                <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
+                                Request failed
+                            </h3>
+                            <span v-if="request.error_type" class="truncate font-mono text-xs text-red-600/80 dark:text-red-400/80">{{ request.error_type }}</span>
+                        </div>
+                        <CodeBlock v-if="request.error_message" :content="request.error_message" variant="error" max-height="16rem" />
+                        <div v-else class="card-body text-sm text-gray-600 dark:text-gray-400">The provider returned HTTP {{ request.status_code ?? '—' }} without a message.</div>
+                    </div>
+
+                    <!-- Model-specific metrics -->
+                    <component :is="metricsComponent" :request="request" :expanded="metricsExpanded" @toggle="metricsExpanded = !metricsExpanded" />
+
+                    <!-- Payload -->
+                    <div v-if="request.response || request.request || request.prompt" class="card overflow-hidden">
+                        <div class="card-header">
+                            <button type="button" class="flex items-center gap-2" @click="payloadExpanded = !payloadExpanded">
+                                <svg class="h-4 w-4 text-gray-400 transition-transform duration-200" :class="{ 'rotate-90': payloadExpanded }" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m9 5 7 7-7 7" /></svg>
+                                <h3>Payload</h3>
+                            </button>
+                            <div v-if="payloadExpanded" class="segmented">
+                                <button v-if="request.response" type="button" :class="{ 'is-active': activeTab === 'response' }" @click="activeTab = 'response'">Response</button>
+                                <button v-if="request.request || request.prompt" type="button" :class="{ 'is-active': activeTab === 'request' }" @click="activeTab = 'request'">Request</button>
+                            </div>
+                        </div>
+                        <template v-if="payloadExpanded">
+                            <div v-if="activeTab === 'response'">
+                                <JsonViewer :data="request.response" max-height="32rem" />
+                            </div>
+                            <div v-if="activeTab === 'request'">
+                                <JsonViewer v-if="request.request" :data="request.request" max-height="32rem" />
+                                <CodeBlock v-else-if="request.prompt" :content="request.prompt" max-height="32rem" />
+                            </div>
                         </template>
                     </div>
                 </div>
-            </div>
 
-            <!-- Model-specific Metrics -->
-            <component :is="metricsComponent" :request="request" :expanded="metricsExpanded" @toggle="metricsExpanded = !metricsExpanded" />
+                <!-- Details -->
+                <aside class="min-w-0 space-y-6">
+                    <div class="card">
+                        <div class="card-header"><h3>Details</h3></div>
+                        <dl class="kv px-5 py-1">
+                            <div>
+                                <dt>Request ID</dt>
+                                <dd class="font-mono text-xs" :title="request.id">{{ request.id }}</dd>
+                            </div>
+                            <div v-if="request.response_id">
+                                <dt>Response ID</dt>
+                                <dd class="flex items-center justify-end gap-1.5">
+                                    <span class="truncate font-mono text-xs" :title="request.response_id">{{ request.response_id }}</span>
+                                    <button
+                                        type="button"
+                                        class="shrink-0 rounded p-0.5 transition-colors"
+                                        :class="copiedField === 'response_id' ? 'text-emerald-500' : 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'"
+                                        :title="copiedField === 'response_id' ? 'Copied' : 'Copy'"
+                                        @click="copyToClipboard(request.response_id, 'response_id')"
+                                    >
+                                        <svg v-if="copiedField !== 'response_id'" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" /></svg>
+                                        <svg v-else class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+                                    </button>
+                                </dd>
+                            </div>
+                            <div v-if="request.endpoint">
+                                <dt>Endpoint</dt>
+                                <dd class="font-mono text-xs" :title="request.endpoint">{{ request.endpoint }}</dd>
+                            </div>
+                            <div v-if="request.finish_reason">
+                                <dt>Finish reason</dt>
+                                <dd><span class="badge" :class="finishReasonClass">{{ request.finish_reason }}</span></dd>
+                            </div>
+                            <div v-if="request.pricing_tier">
+                                <dt>Pricing tier</dt>
+                                <dd class="capitalize">{{ request.pricing_tier }}</dd>
+                            </div>
+                            <div v-if="request.expires_at">
+                                <dt>Expires</dt>
+                                <dd>
+                                    <ExpiryCountdown :expires-at="request.expires_at" :formatted-expires-at="request.formatted_expires_at" @expired="() => {}" />
+                                </dd>
+                            </div>
+                            <div v-if="request.trace_id">
+                                <dt>Trace</dt>
+                                <dd>
+                                    <router-link :to="{ name: 'requests', query: { trace_id: request.trace_id } }" class="font-mono text-xs text-primary-600 hover:underline dark:text-primary-400" :title="request.trace_id">{{ request.trace_id }}</router-link>
+                                </dd>
+                            </div>
+                            <div v-if="request.conversation_id">
+                                <dt>Conversation</dt>
+                                <dd class="font-mono text-xs">{{ request.conversation_id }}<span v-if="request.conversation_turn" class="text-gray-400"> · turn {{ request.conversation_turn }}</span></dd>
+                            </div>
+                            <div v-if="request.request_source">
+                                <dt>Source</dt>
+                                <dd class="capitalize">{{ request.request_source }}</dd>
+                            </div>
+                            <div v-if="request.ip_address">
+                                <dt>IP address</dt>
+                                <dd class="font-mono text-xs">{{ request.ip_address }}</dd>
+                            </div>
+                            <div v-if="request.user_agent">
+                                <dt>User agent</dt>
+                                <dd class="text-xs" :title="request.user_agent">{{ request.user_agent }}</dd>
+                            </div>
+                        </dl>
+                    </div>
 
-            <!-- Request/Response Tabs -->
-            <div class="card" v-if="request.response || request.request || request.prompt">
-                <div
-                    class="card-header cursor-pointer select-none"
-                    :class="{ 'border-b-0 pb-0': payloadExpanded }"
-                    @click="payloadExpanded = !payloadExpanded"
-                >
-                    <div class="flex items-center justify-between w-full">
-                        <div class="flex items-center gap-2">
-                            <svg
-                                class="w-4 h-4 text-gray-400 transition-transform duration-200"
-                                :class="{ 'rotate-90': payloadExpanded }"
-                                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                            >
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                            </svg>
-                            <h3 class="text-sm font-medium">Payload</h3>
-                        </div>
+                    <div v-if="request.tool_call_counts && Object.keys(request.tool_call_counts).length" class="card">
+                        <div class="card-header"><h3>Tool calls</h3></div>
+                        <ul class="kv px-5 py-1">
+                            <li v-for="(count, type) in request.tool_call_counts" :key="type" class="flex items-center justify-between py-2.5 text-sm">
+                                <span class="capitalize text-gray-600 dark:text-gray-300">{{ formatToolName(type) }}</span>
+                                <span class="tabular-nums font-medium text-gray-900 dark:text-white">{{ count }}</span>
+                            </li>
+                        </ul>
                     </div>
-                </div>
-                <template v-if="payloadExpanded">
-                    <div class="px-4 pt-3 pb-2">
-                        <div class="inline-flex items-center p-1 rounded-lg bg-gray-100 dark:bg-gray-700/60">
-                            <button
-                                v-if="request.response"
-                                @click="activeTab = 'response'"
-                                :class="[
-                                    'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
-                                    activeTab === 'response'
-                                        ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
-                                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
-                                ]"
-                            >
-                                Response
-                            </button>
-                            <button
-                                v-if="request.request || request.prompt"
-                                @click="activeTab = 'request'"
-                                :class="[
-                                    'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
-                                    activeTab === 'request'
-                                        ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
-                                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
-                                ]"
-                            >
-                                Request
-                            </button>
-                        </div>
-                    </div>
-                    <div class="border-t border-gray-100 dark:border-gray-700">
-                        <!-- Response Tab Content -->
-                        <div v-if="activeTab === 'response'" class="p-0">
-                            <JsonViewer :data="request.response" max-height="32rem" />
-                        </div>
-                        <!-- Request Tab Content -->
-                        <div v-if="activeTab === 'request'" class="p-0">
-                            <JsonViewer v-if="request.request" :data="request.request" max-height="32rem" />
-                            <CodeBlock v-else-if="request.prompt" :content="request.prompt" max-height="32rem" />
-                        </div>
-                    </div>
-                </template>
-            </div>
 
-            <!-- Error -->
-            <div class="card border-red-200 dark:border-red-800" v-if="request.error_message">
-                <div class="card-header bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
-                    <h3 class="text-sm font-medium text-red-800 dark:text-red-400 flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                        </svg>
-                        Error
-                    </h3>
-                </div>
-                <div class="p-0">
-                    <CodeBlock :content="request.error_message" variant="error" max-height="16rem" />
-                </div>
-            </div>
-
-            <!-- Metadata -->
-            <div class="card">
-                <div
-                    class="card-header cursor-pointer select-none"
-                    :class="{ 'border-b-0': !metadataExpanded }"
-                    @click="metadataExpanded = !metadataExpanded"
-                >
-                    <div class="flex items-center justify-between w-full">
-                        <div class="flex items-center gap-2">
-                            <svg
-                                class="w-4 h-4 text-gray-400 transition-transform duration-200"
-                                :class="{ 'rotate-90': metadataExpanded }"
-                                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                            >
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                            </svg>
-                            <h3 class="text-sm font-medium">Metadata</h3>
-                        </div>
-                    </div>
-                </div>
-                <div v-if="metadataExpanded" class="card-body">
-                    <dl class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-                        <div class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Request ID</dt>
-                            <dd class="text-sm font-mono text-gray-900 dark:text-white">{{ request.id }}</dd>
-                        </div>
-                        <div v-if="request.response_id" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Response ID</dt>
-                            <dd class="flex items-center gap-1.5 text-sm font-mono text-gray-900 dark:text-white">
-                                {{ request.response_id }}
-                                <button
-                                    @click="copyToClipboard(request.response_id, 'response_id')"
-                                    class="inline-flex items-center p-0.5 rounded transition-colors"
-                                    :class="copiedField === 'response_id'
-                                        ? 'text-green-500 dark:text-green-400'
-                                        : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'"
-                                >
-                                    <svg v-if="copiedField !== 'response_id'" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                    </svg>
-                                    <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                                    </svg>
-                                </button>
-                            </dd>
-                        </div>
-                        <div v-if="request.endpoint" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Endpoint</dt>
-                            <dd class="text-sm font-mono text-gray-900 dark:text-white">{{ request.endpoint }}</dd>
-                        </div>
-                        <div class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Created At</dt>
-                            <dd class="text-sm text-gray-900 dark:text-white">{{ request.formatted_created_at }}</dd>
-                        </div>
-                        <div v-if="request.expires_at" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Expires At</dt>
-                            <dd class="text-sm text-gray-900 dark:text-white">
-                                <ExpiryCountdown
-                                    :expires-at="request.expires_at"
-                                    :formatted-expires-at="request.formatted_expires_at"
-                                    @expired="() => {}"
-                                />
-                            </dd>
-                        </div>
-                        <div v-if="request.trace_id" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Trace ID</dt>
-                            <dd class="text-sm font-mono">
-                                <router-link
-                                    :to="{ name: 'requests', query: { trace_id: request.trace_id } }"
-                                    class="text-primary-600 dark:text-primary-400 hover:underline"
-                                >{{ request.trace_id }}</router-link>
-                            </dd>
-                        </div>
-                        <div v-if="request.user_id" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">User ID</dt>
-                            <dd class="text-sm text-gray-900 dark:text-white">{{ request.user_id }}</dd>
-                        </div>
-                        <div v-if="request.conversation_id" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Conversation ID</dt>
-                            <dd class="text-sm font-mono text-gray-900 dark:text-white">{{ request.conversation_id }}</dd>
-                        </div>
-                        <div v-if="request.finish_reason" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Finish Reason</dt>
-                            <dd class="text-sm">
-                                <span
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
-                                    :class="request.finish_reason === 'length' || request.finish_reason === 'max_tokens'
-                                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                                        : request.finish_reason === 'stop' || request.finish_reason === 'end_turn' || request.finish_reason === 'STOP'
-                                            ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                            : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'"
-                                >{{ request.finish_reason }}</span>
-                            </dd>
-                        </div>
-                        <div v-if="request.tool_call_counts && Object.keys(request.tool_call_counts).length" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50 md:col-span-2">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">Tool Calls</dt>
-                            <dd class="flex flex-wrap gap-1.5">
-                                <span
-                                    v-for="(count, type) in request.tool_call_counts"
-                                    :key="type"
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                                >{{ type.replace(/_/g, ' ') }} <span class="ml-1 font-bold tabular-nums">{{ count }}</span></span>
-                            </dd>
-                        </div>
-                        <div v-if="request.ip_address" class="flex justify-between py-2 border-b border-gray-100 dark:border-gray-700/50">
-                            <dt class="text-sm text-gray-500 dark:text-gray-400">IP Address</dt>
-                            <dd class="text-sm font-mono text-gray-900 dark:text-white">{{ request.ip_address }}</dd>
-                        </div>
-                    </dl>
-                    <div v-if="request.tags?.length" class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700/50">
-                        <dt class="text-sm text-gray-500 dark:text-gray-400 mb-2">Tags</dt>
-                        <dd class="flex flex-wrap gap-2">
-                            <span
+                    <div v-if="request.tags?.length" class="card">
+                        <div class="card-header"><h3>Tags</h3></div>
+                        <div class="card-body flex flex-wrap gap-1.5">
+                            <router-link
                                 v-for="tag in request.tags"
                                 :key="tag"
-                                class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
-                            >
-                                <svg class="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                                </svg>
-                                {{ tag }}
-                            </span>
-                        </dd>
+                                :to="{ name: 'requests', query: { tag } }"
+                                class="badge badge-secondary hover:bg-gray-100 dark:hover:bg-gray-800"
+                            >#{{ tag }}</router-link>
+                        </div>
                     </div>
-                </div>
+                </aside>
             </div>
         </div>
     </div>

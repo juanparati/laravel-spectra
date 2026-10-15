@@ -490,29 +490,30 @@ it('stores null tool_call_counts when no tool calls present', function () {
 |--------------------------------------------------------------------------
 */
 
-it('uses minute-based pricing for tts models', function (string $model) {
+it('prices tts models by the unit openai bills them in', function (string $model, string $unit) {
     $calculator = app(CostCalculator::class);
-    $unit = $calculator->getPricingUnit('openai', $model);
 
-    expect($unit)->toBe('minute');
+    expect($calculator->getPricingUnit('openai', $model))->toBe($unit);
 })->with([
-    'tts-1' => ['tts-1'],
-    'tts-1-hd' => ['tts-1-hd'],
-    'gpt-4o-mini-tts' => ['gpt-4o-mini-tts'],
+    'tts-1' => ['tts-1', 'characters'],
+    'tts-1-hd' => ['tts-1-hd', 'characters'],
+    'gpt-4o-mini-tts' => ['gpt-4o-mini-tts', 'minute'],
 ]);
 
-it('calculates tts cost by duration', function () {
+it('calculates tts cost by characters', function () {
     $calculator = app(CostCalculator::class);
 
-    $cost = $calculator->calculateByDuration('openai', 'tts-1', 60.0);
+    // tts-1: $15 per 1M characters → 1,000 characters = 1.5¢.
+    $cost = $calculator->calculateByCharacters('openai', 'tts-1', 1_000);
 
     expect($cost['total_cost_in_cents'])->toBe(1.5);
 });
 
-it('calculates tts-1-hd cost by duration', function () {
+it('calculates tts-1-hd cost by characters', function () {
     $calculator = app(CostCalculator::class);
 
-    $cost = $calculator->calculateByDuration('openai', 'tts-1-hd', 60.0);
+    // tts-1-hd: $30 per 1M characters → 1,000 characters = 3¢.
+    $cost = $calculator->calculateByCharacters('openai', 'tts-1-hd', 1_000);
 
     expect($cost['total_cost_in_cents'])->toBe(3.0);
 });

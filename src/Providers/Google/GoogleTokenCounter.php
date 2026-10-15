@@ -7,6 +7,10 @@ namespace Spectra\Providers\Google;
 use Illuminate\Support\Facades\Http;
 use Spectra\Support\ApiKeyResolver;
 
+/**
+ * Asks the Gemini countTokens API how many tokens a request had, for
+ * responses that don't report usage (embeddings). Never tracked itself.
+ */
 class GoogleTokenCounter
 {
     public function __construct(

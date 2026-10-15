@@ -13,6 +13,11 @@ use Spectra\Data\SearchMetrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 
+/**
+ * Scaleway reranking (`/v1/rerank`, optionally under a project id). Scaleway
+ * reranks with an embedding model and bills its tokens
+ * (`usage.total_tokens`) at that model's embedding price.
+ */
 class RerankHandler implements ExtractsModelFromResponse, Handler
 {
     use ExtractsModelField;
@@ -25,7 +30,10 @@ class RerankHandler implements ExtractsModelFromResponse, Handler
 
     public function endpoints(): array
     {
-        return ['/{project_id}/v1/rerank'];
+        return [
+            '/v1/rerank',
+            '/{project_id}/v1/rerank',
+        ];
     }
 
     /**

@@ -56,7 +56,12 @@ it('converts token metrics to array', function () {
         'completionTokens' => 50,
         'cachedTokens' => 10,
         'reasoningTokens' => 0,
-        'cacheCreationTokens' => 0,
+        'cacheWriteTokens' => 0,
+        'cacheWrite1hTokens' => 0,
+        'audioInputTokens' => 0,
+        'imageInputTokens' => 0,
+        'audioOutputTokens' => 0,
+        'imageOutputTokens' => 0,
     ]);
 });
 
@@ -73,7 +78,12 @@ it('converts token metrics with reasoning tokens to array', function () {
         'completionTokens' => 50,
         'cachedTokens' => 10,
         'reasoningTokens' => 25,
-        'cacheCreationTokens' => 0,
+        'cacheWriteTokens' => 0,
+        'cacheWrite1hTokens' => 0,
+        'audioInputTokens' => 0,
+        'imageInputTokens' => 0,
+        'audioOutputTokens' => 0,
+        'imageOutputTokens' => 0,
     ]);
 });
 

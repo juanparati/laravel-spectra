@@ -10,18 +10,51 @@ export function useHelpers() {
         return string.length > length ? string.substring(0, length) + '...' : string;
     };
 
-    const formatCurrency = (cents, decimals = 6) => {
+    /**
+     * Format a cost given in cents.
+     *
+     * Large amounts get two decimals and thousands separators; small
+     * amounts keep enough significant digits to stay meaningful
+     * ($0.00145 rather than $0.001450 or $0.00).
+     */
+    const formatCurrency = (cents, decimals = null) => {
         const symbol = spectra.currencySymbol || '$';
-        if (cents === null || cents === undefined) return symbol + '0.00';
-        const isNegative = cents < 0;
-        const absDollars = Math.abs(cents) / 100;
-        const sign = isNegative ? '-' : '';
-        // For very small amounts, always show at least 6 decimal places for visibility
-        if (absDollars > 0 && absDollars < 0.01) {
-            return sign + symbol + absDollars.toFixed(Math.max(decimals, 6));
+        const value = Number(cents || 0) / 100;
+        const sign = value < 0 ? '-' : '';
+        const abs = Math.abs(value);
+
+        if (abs === 0) return symbol + '0.00';
+
+        if (decimals !== null && abs >= 0.01) {
+            return sign + symbol + abs.toLocaleString('en-US', { minimumFractionDigits: Math.min(decimals, 2), maximumFractionDigits: decimals });
         }
-        // For larger amounts, show 2-4 decimal places
-        return sign + symbol + absDollars.toFixed(Math.min(decimals, 4));
+
+        if (abs >= 1) {
+            return sign + symbol + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        if (abs >= 0.01) {
+            return sign + symbol + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+        }
+
+        return sign + symbol + Number(abs.toPrecision(3)).toString();
+    };
+
+    /** "2026-10-01" → "Oct 1" (dates from the API are calendar days, read as UTC). */
+    const formatShortDate = (date) => {
+        if (!date) return '';
+        const parsed = new Date(String(date).length === 10 ? date + 'T00:00:00Z' : date);
+        if (Number.isNaN(parsed.getTime())) return String(date);
+
+        return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: String(date).length === 10 ? 'UTC' : undefined });
+    };
+
+    /** 1234 → "1,234"; 1_234_567 → "1.23M" when compact. */
+    const formatCompact = (num) => {
+        const value = Number(num || 0);
+        if (Math.abs(value) < 10_000) return value.toLocaleString('en-US');
+
+        return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(value);
     };
 
     const formatNumber = (num) => {
@@ -49,32 +82,44 @@ export function useHelpers() {
     };
 
     /**
-     * Provider brand colors — single source of truth for the entire app.
+     * Provider colors for charts and badges — the single source of truth.
      *
-     * badge: CSS class for badges (defined in app.css)
-     * chart: RGB string for Chart.js datasets
+     * Chart colors come from a validated, color-blind-safe categorical palette
+     * (light and dark steps). Each provider owns a fixed slot, so a provider
+     * keeps its color across every chart and filter. Providers beyond the
+     * eight slots share the neutral "other" color.
      */
-    const providerBrandColors = {
-        openai:      { badge: 'badge-provider-openai',      chart: 'rgb(16, 163, 127)' },   // #10A37F — OpenAI green
-        anthropic:   { badge: 'badge-provider-anthropic',    chart: 'rgb(217, 119, 87)' },   // #D97757 — Anthropic terracotta
-        google:      { badge: 'badge-provider-google',       chart: 'rgb(66, 133, 244)' },   // #4285F4 — Google blue
-        xai:         { badge: 'badge-provider-xai',          chart: 'rgb(113, 113, 122)' },  // #71717A — xAI neutral
-        ollama:      { badge: 'badge-provider-ollama',       chart: 'rgb(245, 245, 245)' },  // light gray — Ollama
-        azure:       { badge: 'badge-provider-azure',        chart: 'rgb(0, 120, 212)' },    // #0078D4 — Azure blue
-        openrouter:  { badge: 'badge-provider-openrouter',   chart: 'rgb(110, 65, 226)' },   // #6E41E2 — OpenRouter purple
-        cohere:      { badge: 'badge-provider-cohere',       chart: 'rgb(57, 89, 255)' },    // #3959FF — Cohere blue
-        groq:        { badge: 'badge-provider-groq',         chart: 'rgb(244, 101, 35)' },   // #F46523 — Groq orange
-        elevenlabs:  { badge: 'badge-provider-elevenlabs',   chart: 'rgb(50, 50, 50)' },     // dark — ElevenLabs
-        replicate:   { badge: 'badge-provider-replicate',    chart: 'rgb(50, 50, 50)' },     // dark — Replicate
-        mistral:     { badge: 'badge-provider-mistral',      chart: 'rgb(255, 116, 38)' },   // #FF7426 — Mistral orange
+    const isDark = () => document.documentElement.classList.contains('dark');
+
+    const seriesPalette = {
+        light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'],
+        dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
+        other: { light: '#a1a1aa', dark: '#71717a' },
     };
+
+    const providerSlots = ['openai', 'anthropic', 'google', 'xai', 'mistral', 'groq', 'openrouter', 'cohere'];
+
+    const seriesColor = (index) => {
+        const palette = isDark() ? seriesPalette.dark : seriesPalette.light;
+
+        return palette[index] ?? (isDark() ? seriesPalette.other.dark : seriesPalette.other.light);
+    };
+
+    const providerBrandColors = Object.fromEntries(
+        [...providerSlots, 'replicate', 'falai', 'elevenlabs', 'scaleway', 'ollama', 'azure'].map((slug) => [
+            slug,
+            { badge: 'badge-provider-' + slug },
+        ]),
+    );
 
     const providerClass = (provider) => {
         return providerBrandColors[provider]?.badge || 'badge-secondary';
     };
 
     const providerChartColor = (provider) => {
-        return providerBrandColors[provider]?.chart || 'rgb(156, 163, 175)';
+        const slot = providerSlots.indexOf(provider);
+
+        return seriesColor(slot === -1 ? 99 : slot);
     };
 
     const apiRequest = async (method, endpoint, data = {}) => {
@@ -110,6 +155,9 @@ export function useHelpers() {
         spectra,
         truncate,
         formatCurrency,
+        formatCompact,
+        formatShortDate,
+        seriesColor,
         currencySymbol,
         formatNumber,
         formatDuration,

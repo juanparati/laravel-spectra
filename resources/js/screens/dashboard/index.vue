@@ -11,9 +11,10 @@ import StatCard from '@/components/StatCard.vue';
 import StatusCode from '@/components/StatusCode.vue';
 import PageRangeHeader from '@/components/PageRangeHeader.vue';
 import ProviderLogo from '@/components/ProviderLogo.vue';
+import Sparkline from '@/components/Sparkline.vue';
 
 const router = useRouter();
-const { formatNumber, formatCurrency, formatDuration, formatDurationSeconds, truncate, providerClass, providerChartColor, apiRequest } = useHelpers();
+const { formatNumber, formatCompact, formatShortDate, formatCurrency, formatDuration, formatDurationSeconds, truncate, providerChartColor, seriesColor, apiRequest } = useHelpers();
 const { period, startDate, endDate, periodLabel, applyQueryState, buildQueryParams, syncQueryToRouter } = usePeriodQuery();
 const { providers, loadProviders, providerDisplayName } = useProviders();
 const { createLineChart, createDoughnutChart } = useCharts();
@@ -91,6 +92,8 @@ const loadStats = async () => {
         const data = await apiRequest('get', '/stats?' + buildQueryParams().toString());
         stats.value = data;
         layout.value = data.layout || layout.value;
+        // Draw once the chart containers are visible, so they get a real size.
+        loading.value = false;
         await nextTick();
         renderCharts();
     } catch (error) {
@@ -118,10 +121,11 @@ const renderRequestsChart = () => {
     const data = stats.value.requests_by_date || [];
 
     requestsChart = createLineChart(requestsChartRef.value, {
-        labels: data.map(d => d.date),
+        labels: data.map(d => formatShortDate(d.date)),
         values: data.map(d => d.count),
     }, {
         label: 'Requests',
+        chartOptions: { aspectRatio: 2.6 },
     });
 };
 
@@ -134,8 +138,9 @@ const renderProviderChart = () => {
     providerChart = createDoughnutChart(providerChartRef.value, {
         labels: data.map(d => providerDisplayName(d.provider)),
         values: data.map(d => d.count),
-        colors: data.map(d => providerChartColor(d.provider)),
+        colors: () => data.map(d => providerChartColor(d.provider)),
     }, {
+        legend: false,
         chartOptions: {
             animation: false,
         },
@@ -151,7 +156,9 @@ const renderModelTypeChart = () => {
     modelTypeChart = createDoughnutChart(modelTypeChartRef.value, {
         labels: data.map(d => d.label),
         values: data.map(d => d.count),
+        colors: () => data.map((d, index) => seriesColor(index)),
     }, {
+        legend: false,
         chartOptions: {
             animation: false,
         },
@@ -188,14 +195,34 @@ const showVideos = computed(() => ['full', 'video'].includes(layout.value));
 const showTts = computed(() => ['full', 'audio'].includes(layout.value));
 const showStt = computed(() => ['full', 'audio'].includes(layout.value));
 
-// Watch for dark mode changes to re-render charts
-const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-        if (mutation.attributeName === 'class') {
-            renderCharts();
-        }
-    });
+// Daily request counts for the stat-card sparkline.
+const requestTrend = computed(() => (stats.value.requests_by_date || []).map((d) => d.count));
+
+// Legend rows for the breakdown doughnut: label, count, share and color.
+const breakdownRows = computed(() => {
+    const byProvider = breakdownTab.value === 'provider';
+    const rows = byProvider ? (stats.value.requests_by_provider || []) : (stats.value.stats_by_model_type || []);
+    const total = rows.reduce((sum, row) => sum + Number(row.count || 0), 0) || 1;
+
+    return rows.map((row, index) => ({
+        key: byProvider ? row.provider : row.model_type ?? row.label,
+        label: byProvider ? providerDisplayName(row.provider) : row.label,
+        provider: byProvider ? row.provider : null,
+        count: Number(row.count || 0),
+        share: (Number(row.count || 0) / total) * 100,
+        color: byProvider ? providerChartColor(row.provider) : seriesColor(index),
+    }));
 });
+
+const topModelMax = computed(() => Math.max(1, ...(stats.value.top_models || []).map((m) => Number(m.count || 0))));
+
+// Media stat cards are shown only when the period has that kind of traffic.
+const mediaCards = computed(() => [
+    { key: 'images', show: showImages.value && stats.value.total_images > 0, label: 'Images', value: formatNumber(stats.value.total_images), unit: stats.value.total_images === 1 ? 'image' : 'images', cost: stats.value.cost_by_model_type?.image ?? 0 },
+    { key: 'videos', show: showVideos.value && stats.value.total_videos > 0, label: 'Videos', value: formatNumber(stats.value.total_videos), unit: stats.value.total_videos === 1 ? 'video' : 'videos', cost: stats.value.cost_by_model_type?.video ?? 0 },
+    { key: 'tts', show: showTts.value && stats.value.tts_characters > 0, label: 'Text-to-speech', value: formatCompact(stats.value.tts_characters), unit: 'characters', cost: stats.value.cost_by_model_type?.tts ?? 0 },
+    { key: 'stt', show: showStt.value && stats.value.stt_duration_seconds > 0, label: 'Speech-to-text', value: formatDurationSeconds(stats.value.stt_duration_seconds), unit: 'audio', cost: stats.value.cost_by_model_type?.stt ?? 0 },
+].filter((card) => card.show));
 
 onMounted(async () => {
     applyQueryState();
@@ -205,11 +232,9 @@ onMounted(async () => {
         loadProviders(),
     ]);
     await loadStats();
-    observer.observe(document.documentElement, { attributes: true });
 });
 
 onUnmounted(() => {
-    observer.disconnect();
     if (requestsChart) requestsChart.destroy();
     if (providerChart) providerChart.destroy();
     if (modelTypeChart) modelTypeChart.destroy();
@@ -217,10 +242,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="">
-        <!-- Header -->
+    <div>
         <PageRangeHeader
-            title="Dashboard"
+            title="Overview"
+            :subtitle="`AI traffic, spend and latency · ${periodLabel}`"
             v-model:period="period"
             v-model:start-date="startDate"
             v-model:end-date="endDate"
@@ -228,156 +253,131 @@ onUnmounted(() => {
             @change="onRangeChange"
         />
 
-        <!-- Stats Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-            <StatCard label="Total Requests" gradient="from-primary-500 to-cyan-500" :loading="loading" :period-label="periodLabel">
-                <div class="stat-value !mt-1 !text-[2rem]">{{ formatNumber(stats.total_requests) }}</div>
-            </StatCard>
-            <StatCard label="Total Cost" gradient="from-emerald-500 to-teal-500" :loading="loading" :period-label="periodLabel" skeleton-width="70%">
-                <div class="stat-value !mt-1 !text-[2rem]">{{ formatCurrency(stats.total_cost_in_cents) }}</div>
-            </StatCard>
-            <StatCard v-if="showTokens" label="Tokens" gradient="from-violet-500 to-indigo-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(stats.total_tokens) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">tokens</span>
-                </div>
+        <!-- Headline numbers -->
+        <div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Requests" :loading="loading">
+                <div class="stat-value">{{ formatNumber(stats.total_requests) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Text + Embeddings</div>
+                    <Sparkline v-if="!loading" :values="requestTrend" class="mt-3" />
                 </template>
             </StatCard>
-            <StatCard v-if="showImages" label="Images Generated" gradient="from-fuchsia-500 to-pink-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(stats.total_images) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">images</span>
-                    <span class="text-sm font-medium text-gray-400"> / {{ formatCurrency(stats.cost_by_model_type?.image ?? 0) }}</span>
-                </div>
+            <StatCard label="Spend" :loading="loading" skeleton-width="70%">
+                <div class="stat-value">{{ formatCurrency(stats.total_cost_in_cents) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ formatDurationSeconds(stats.total_duration_seconds) }} runtime</div>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                        <template v-if="stats.total_requests">
+                            {{ formatCurrency(stats.total_cost_in_cents / stats.total_requests) }} per request on average
+                        </template>
+                        <template v-else>No spend in this period</template>
+                    </div>
                 </template>
             </StatCard>
-            <StatCard v-if="showVideos" label="Videos Generated" gradient="from-amber-500 to-orange-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(stats.total_videos) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">videos</span>
-                    <span class="text-sm font-medium text-gray-400"> / {{ formatCurrency(stats.cost_by_model_type?.video ?? 0) }}</span>
-                </div>
+            <StatCard v-if="showTokens" label="Tokens" :loading="loading" skeleton-width="50%">
+                <div class="stat-value" :title="formatNumber(stats.total_tokens) + ' tokens'">{{ formatCompact(stats.total_tokens) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ formatDurationSeconds(stats.total_duration_seconds) }} runtime</div>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">Input and output, text and embeddings</div>
                 </template>
             </StatCard>
-            <StatCard v-if="showTts" label="Text-to-Speech" gradient="from-cyan-500 to-blue-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(stats.tts_characters) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">chars</span>
-                    <span class="text-sm font-medium text-gray-400"> / {{ formatCurrency(stats.cost_by_model_type?.tts ?? 0) }}</span>
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ formatDurationSeconds(stats.tts_duration_seconds) }} synthesized</div>
+            <StatCard label="Average latency" :loading="loading" skeleton-width="40%">
+                <template #action>
+                    <button
+                        v-if="latencyByModelType.length"
+                        type="button"
+                        class="text-xs font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400"
+                        @click="openLatencyBreakdown"
+                    >
+                        By type
+                    </button>
                 </template>
-            </StatCard>
-            <StatCard v-if="showStt" label="Speech-to-Text" gradient="from-sky-500 to-indigo-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatDurationSeconds(stats.stt_duration_seconds) }}
-                    <span class="text-sm font-medium text-gray-400"> / {{ formatCurrency(stats.cost_by_model_type?.stt ?? 0) }}</span>
-                </div>
+                <div class="stat-value">{{ formatDuration(stats.avg_latency) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Total transcribed audio</div>
-                </template>
-            </StatCard>
-            <StatCard label="Avg Latency" gradient="from-rose-500 to-pink-500" :loading="loading" skeleton-width="40%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatDuration(stats.avg_latency) }}
-                    <template v-if="latencyByModelType.length">
-                        <span class="text-sm font-medium text-gray-400"> / </span>
-                        <button
-                            type="button"
-                            class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                            @click="openLatencyBreakdown"
-                        >
-                            stats
-                        </button>
-                    </template>
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Across successful requests</div>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">Across successful requests</div>
                 </template>
             </StatCard>
         </div>
 
-        <!-- Charts -->
-        <div class="flex items-center justify-between mb-3 px-1">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider">Trends & Breakdown</h3>
-            <span class="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">{{ periodLabel }}</span>
+        <!-- Media usage (only kinds that appear in this period) -->
+        <div
+            v-if="!loading && mediaCards.length"
+            class="card mb-4 grid grid-cols-1 divide-y divide-gray-100 sm:divide-x sm:divide-y-0 dark:divide-gray-800"
+            :class="{ 1: 'sm:grid-cols-1', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-4' }[mediaCards.length]"
+        >
+            <div v-for="card in mediaCards" :key="card.key" class="flex items-center justify-between gap-4 px-5 py-3.5">
+                <div class="min-w-0">
+                    <div class="stat-label">{{ card.label }}</div>
+                    <div class="mt-0.5 flex items-baseline gap-1.5">
+                        <span class="text-lg font-semibold tracking-tight text-gray-900 tabular-nums dark:text-white">{{ card.value }}</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ card.unit }}</span>
+                    </div>
+                </div>
+                <span class="text-sm font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ formatCurrency(card.cost) }}</span>
+            </div>
         </div>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-            <div class="lg:col-span-2 card">
+
+        <!-- Charts -->
+        <div class="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div class="card lg:col-span-2">
                 <div class="card-header">
                     <div>
-                        <h3 class="text-sm font-semibold">Requests Over Time</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Daily request volume trend</p>
+                        <h3>Requests over time</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Daily volume</p>
                     </div>
                 </div>
                 <div class="card-body">
                     <template v-if="loading">
-                        <Skeleton variant="chart" height="200px" />
+                        <Skeleton variant="chart" height="240px" />
                     </template>
-                    <canvas v-show="!loading" ref="requestsChartRef" height="100"></canvas>
+                    <canvas v-show="!loading" ref="requestsChartRef"></canvas>
                 </div>
             </div>
-            <div class="card">
-                <div class="card-header flex-wrap gap-3">
+
+            <div class="card flex flex-col">
+                <div class="card-header">
                     <div>
-                        <h3 class="text-sm font-semibold">Request Breakdown</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Distribution view</p>
+                        <h3>Breakdown</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Share of requests</p>
                     </div>
-                    <div class="inline-flex items-center p-1 rounded-lg bg-gray-100 dark:bg-gray-700/60">
-                        <button
-                            @click="breakdownTab = 'provider'"
-                            :class="[
-                                'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
-                                breakdownTab === 'provider'
-                                    ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
-                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
-                            ]"
-                        >
-                            By Provider
-                        </button>
-                        <button
-                            v-if="layout === 'full'"
-                            @click="breakdownTab = 'model-type'"
-                            :class="[
-                                'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
-                                breakdownTab === 'model-type'
-                                    ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white shadow-sm'
-                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200',
-                            ]"
-                        >
-                            By Model Type
-                        </button>
+                    <div class="segmented">
+                        <button type="button" :class="{ 'is-active': breakdownTab === 'provider' }" @click="breakdownTab = 'provider'">Provider</button>
+                        <button v-if="layout === 'full'" type="button" :class="{ 'is-active': breakdownTab === 'model-type' }" @click="breakdownTab = 'model-type'">Type</button>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div v-if="loading" class="flex items-center justify-center" style="height: 200px">
-                        <div class="w-32 h-32 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
+                <div class="card-body flex flex-1 flex-col gap-5">
+                    <div v-if="loading" class="flex h-40 items-center justify-center">
+                        <div class="h-32 w-32 animate-pulse rounded-full bg-gray-100 dark:bg-gray-800"></div>
                     </div>
-                    <div v-show="!loading && breakdownTab === 'provider'">
-                        <canvas ref="providerChartRef" height="200"></canvas>
+                    <div v-show="!loading" class="mx-auto w-40">
+                        <div v-show="breakdownTab === 'provider'"><canvas ref="providerChartRef"></canvas></div>
+                        <div v-show="breakdownTab === 'model-type'"><canvas ref="modelTypeChartRef"></canvas></div>
                     </div>
-                    <div v-show="!loading && breakdownTab === 'model-type'">
-                        <canvas ref="modelTypeChartRef" height="200"></canvas>
-                    </div>
+                    <ul v-if="!loading" class="space-y-2 text-sm">
+                        <li v-for="row in breakdownRows" :key="row.key" class="flex items-center gap-2.5">
+                            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" :style="{ backgroundColor: row.color }" aria-hidden="true"></span>
+                            <ProviderLogo
+                                v-if="row.provider"
+                                :provider="row.provider"
+                                class="inline-flex h-3.5 w-3.5 shrink-0 items-center text-gray-500 dark:text-gray-400 [&>svg]:h-full [&>svg]:w-full"
+                                aria-hidden="true"
+                            />
+                            <span class="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-300">{{ row.label }}</span>
+                            <span class="tabular-nums text-gray-900 dark:text-white">{{ formatNumber(row.count) }}</span>
+                            <span class="w-12 text-right tabular-nums text-xs text-gray-500 dark:text-gray-400">{{ row.share.toFixed(1) }}%</span>
+                        </li>
+                        <li v-if="!breakdownRows.length" class="py-6 text-center text-gray-500 dark:text-gray-400">No requests in this period</li>
+                    </ul>
                 </div>
             </div>
         </div>
 
         <!-- Tables -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div class="card">
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div class="card overflow-hidden">
                 <div class="card-header">
                     <div>
-                        <h3 class="text-sm font-semibold">Top Models</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Highest request volume</p>
+                        <h3>Top models</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">By request volume</p>
                     </div>
+                    <router-link :to="{ name: 'costs' }" class="text-xs font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400">View costs</router-link>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="table">
@@ -393,30 +393,30 @@ onUnmounted(() => {
                                 <Skeleton variant="table-row" :lines="5" />
                             </template>
                             <template v-else>
-                                <tr v-for="model in stats.top_models" :key="model.model">
-                                    <td>
-                                        <div class="flex items-center gap-2 min-w-0">
+                                <tr v-for="model in stats.top_models" :key="model.provider + model.model">
+                                    <td class="max-w-0 w-[55%]">
+                                        <div class="flex min-w-0 items-center gap-2.5">
                                             <ProviderLogo
                                                 :provider="model.provider"
                                                 :title="providerDisplayName(model.provider)"
-                                                class="inline-flex items-center shrink-0 w-4 h-4 [&>svg]:w-full [&>svg]:h-full text-gray-500 dark:text-gray-400"
+                                                class="inline-flex h-4 w-4 shrink-0 items-center text-gray-500 dark:text-gray-400 [&>svg]:h-full [&>svg]:w-full"
                                                 aria-hidden="true"
                                             />
-                                            <span class="max-w-[14rem] truncate font-medium text-gray-900 dark:text-white" :title="model.model">
-                                                {{ model.model }}
-                                            </span>
+                                            <div class="min-w-0 flex-1">
+                                                <div class="truncate font-medium text-gray-900 dark:text-white" :title="model.model">{{ model.model }}</div>
+                                                <div class="mt-1.5 h-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                                                    <div class="h-full rounded-full bg-primary-500/70" :style="{ width: (model.count / topModelMax) * 100 + '%' }"></div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </td>
-                                    <td class="text-right tabular-nums font-medium">{{ formatNumber(model.count) }}</td>
+                                    <td class="text-right tabular-nums">{{ formatNumber(model.count) }}</td>
                                     <td class="text-right tabular-nums font-medium text-gray-900 dark:text-white">{{ formatCurrency(model.cost) }}</td>
                                 </tr>
                                 <tr v-if="!stats.top_models?.length">
-                                    <td colspan="3" class="text-center py-8 text-gray-500">
+                                    <td colspan="3">
                                         <div class="empty-state">
-                                            <svg class="empty-state-icon mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                            </svg>
-                                            <p class="empty-state-title">No data available</p>
+                                            <p class="empty-state-title">No models used in this period</p>
                                         </div>
                                     </td>
                                 </tr>
@@ -426,27 +426,28 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card overflow-hidden">
                 <div class="card-header">
                     <div>
-                        <h3 class="text-sm font-semibold">Recent Requests</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Latest activity feed</p>
+                        <h3>Recent requests</h3>
+                        <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Latest activity</p>
                     </div>
+                    <router-link :to="{ name: 'requests' }" class="text-xs font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400">View all</router-link>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="table table-fixed">
                         <colgroup>
-                            <col class="w-[48%]" />
-                            <col class="w-[18%]" />
-                            <col class="w-[16%]" />
-                            <col class="w-[18%]" />
+                            <col class="w-[46%]" />
+                            <col class="w-[20%]" />
+                            <col class="w-[14%]" />
+                            <col class="w-[20%]" />
                         </colgroup>
                         <thead>
                             <tr>
                                 <th>Model</th>
                                 <th class="text-right">Usage</th>
                                 <th>Status</th>
-                                <th class="text-right">Time</th>
+                                <th class="text-right">When</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -457,42 +458,31 @@ onUnmounted(() => {
                                 <tr
                                     v-for="request in stats.recent_requests"
                                     :key="request.id"
+                                    class="group cursor-pointer"
                                     @click="goToRequest(request.id)"
-                                    class="cursor-pointer group"
                                 >
                                     <td class="max-w-0">
-                                        <div class="flex items-center gap-2 min-w-0">
+                                        <div class="flex min-w-0 items-center gap-2.5">
                                             <ProviderLogo
                                                 :provider="request.provider"
                                                 :title="providerDisplayName(request.provider, request.provider_display_name)"
-                                                class="inline-flex items-center shrink-0 w-4 h-4 [&>svg]:w-full [&>svg]:h-full text-gray-500 dark:text-gray-400"
+                                                class="inline-flex h-4 w-4 shrink-0 items-center text-gray-500 dark:text-gray-400 [&>svg]:h-full [&>svg]:w-full"
                                                 aria-hidden="true"
                                             />
-                                            <span
-                                                class="truncate font-medium text-gray-900 dark:text-white"
-                                                :title="request.model || ''"
-                                            >
-                                                {{ truncate(request.model, 32) }}
-                                            </span>
+                                            <span class="truncate font-medium text-gray-900 dark:text-white" :title="request.model || ''">{{ truncate(request.model, 32) }}</span>
                                         </div>
                                     </td>
-                                    <td class="text-right tabular-nums text-sm">{{ formatUsage(request) }}</td>
-                                    <td>
-                                        <StatusCode :code="request.status_code" />
-                                    </td>
-                                    <td class="text-right whitespace-nowrap">
-                                        <span class="group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">
-                                            {{ request.created_at_human }}
-                                        </span>
+                                    <td class="text-right tabular-nums">{{ formatUsage(request) }}</td>
+                                    <td><StatusCode :code="request.status_code" /></td>
+                                    <td class="whitespace-nowrap text-right text-gray-500 transition-colors group-hover:text-primary-600 dark:text-gray-400 dark:group-hover:text-primary-400">
+                                        {{ request.created_at_human }}
                                     </td>
                                 </tr>
                                 <tr v-if="!stats.recent_requests?.length">
-                                    <td colspan="4" class="text-center py-8 text-gray-500">
+                                    <td colspan="4">
                                         <div class="empty-state">
-                                            <svg class="empty-state-icon mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-                                            </svg>
                                             <p class="empty-state-title">No requests yet</p>
+                                            <p class="empty-state-description">Requests to AI providers will show up here as your app makes them.</p>
                                         </div>
                                     </td>
                                 </tr>
@@ -503,49 +493,37 @@ onUnmounted(() => {
             </div>
         </div>
 
+        <!-- Latency by model type -->
         <div
             v-if="showLatencyBreakdownModal"
-            class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 p-4 backdrop-blur-sm"
             @click="closeLatencyBreakdown"
         >
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden" @click.stop>
-                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-4">
+            <div class="w-full max-w-xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-pop dark:border-gray-800 dark:bg-gray-900" @click.stop>
+                <div class="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                     <div>
-                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Average Latency by Model Type</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ periodLabel }}</p>
+                        <h3 class="text-base font-semibold text-gray-900 dark:text-white">Average latency by model type</h3>
+                        <p class="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{{ periodLabel }}</p>
                     </div>
-                    <button
-                        type="button"
-                        class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
-                        @click="closeLatencyBreakdown"
-                    >
+                    <button type="button" class="btn-ghost inline-flex h-8 w-8 items-center justify-center rounded-lg" @click="closeLatencyBreakdown">
                         <span class="sr-only">Close</span>
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
                     </button>
                 </div>
-
-                <div class="overflow-auto max-h-[65vh]">
+                <div class="max-h-[65vh] overflow-auto">
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Model Type</th>
-                                <th class="text-right">Avg Latency</th>
+                                <th>Model type</th>
+                                <th class="text-right">Average</th>
                                 <th class="text-right">Requests</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-for="row in latencyByModelType" :key="row.model_type">
-                                <td>
-                                    <div class="font-medium text-gray-900 dark:text-white">{{ row.label }}</div>
-                                    <div class="text-xs text-gray-500 dark:text-gray-400">{{ row.model_type }}</div>
-                                </td>
+                                <td class="font-medium text-gray-900 dark:text-white">{{ row.label }}</td>
                                 <td class="text-right tabular-nums">{{ formatDuration(row.avg_latency) }}</td>
                                 <td class="text-right tabular-nums">{{ formatNumber(row.count) }}</td>
-                            </tr>
-                            <tr v-if="!latencyByModelType.length">
-                                <td colspan="3" class="text-center py-8 text-gray-500 dark:text-gray-400">No latency data available.</td>
                             </tr>
                         </tbody>
                     </table>

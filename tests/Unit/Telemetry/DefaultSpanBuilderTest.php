@@ -50,7 +50,7 @@ it('builds a valid OTLP span from request data', function () {
     expect($span)
         ->toBeArray()
         ->toHaveKeys(['traceId', 'spanId', 'parentSpanId', 'name', 'kind', 'startTimeUnixNano', 'endTimeUnixNano', 'attributes', 'status', 'events', 'links'])
-        ->and($span['name'])->toBe('ai.openai.gpt-4o')
+        ->and($span['name'])->toBe('chat gpt-4o-2024-05-13')
         ->and($span['kind'])->toBe(3) // SPAN_KIND_CLIENT
         ->and($span['parentSpanId'])->toBe('')
         ->and($span['traceId'])->toBe('550e8400e29b41d4a716446655440000')
@@ -146,11 +146,12 @@ it('includes standard gen_ai attributes', function () {
     $span = (new DefaultSpanBuilder)->build($data);
     $attrs = collect($span['attributes']);
 
-    expect($attrs->firstWhere('key', 'gen_ai.system')['value']['stringValue'])->toBe('openai')
+    expect($attrs->firstWhere('key', 'gen_ai.provider.name')['value']['stringValue'])->toBe('openai')
+        ->and($attrs->firstWhere('key', 'gen_ai.operation.name')['value']['stringValue'])->toBe('chat')
         ->and($attrs->firstWhere('key', 'gen_ai.request.model')['value']['stringValue'])->toBe('gpt-4o')
-        ->and($attrs->firstWhere('key', 'gen_ai.usage.prompt_tokens')['value']['intValue'])->toBe(100)
-        ->and($attrs->firstWhere('key', 'gen_ai.usage.completion_tokens')['value']['intValue'])->toBe(50)
-        ->and($attrs->firstWhere('key', 'gen_ai.usage.total_tokens')['value']['intValue'])->toBe(150)
+        ->and($attrs->firstWhere('key', 'gen_ai.usage.input_tokens')['value']['intValue'])->toBe(100)
+        ->and($attrs->firstWhere('key', 'gen_ai.usage.output_tokens')['value']['intValue'])->toBe(50)
+        ->and($attrs->firstWhere('key', 'gen_ai.system'))->toBeNull()
         ->and($attrs->firstWhere('key', 'spectra.cost_cents')['value']['doubleValue'])->toBe(0.5)
         ->and($attrs->firstWhere('key', 'spectra.latency_ms')['value']['intValue'])->toBe(1500);
 });
@@ -200,14 +201,14 @@ it('includes conditional attributes when present', function () {
 
     expect($attrs->firstWhere('key', 'gen_ai.response.model')['value']['stringValue'])->toBe('gpt-4o-2024-05-13')
         ->and($attrs->firstWhere('key', 'gen_ai.response.id')['value']['stringValue'])->toBe('resp-xyz')
-        ->and($attrs->firstWhere('key', 'gen_ai.response.finish_reason')['value']['stringValue'])->toBe('stop')
-        ->and($attrs->firstWhere('key', 'gen_ai.operation.name')['value']['stringValue'])->toBe('/v1/chat/completions')
+        ->and($attrs->firstWhere('key', 'gen_ai.response.finish_reasons')['value']['arrayValue']['values'][0]['stringValue'])->toBe('stop')
+        ->and($attrs->firstWhere('key', 'spectra.endpoint')['value']['stringValue'])->toBe('/v1/chat/completions')
+        ->and($attrs->firstWhere('key', 'gen_ai.request.stream')['value']['boolValue'])->toBeTrue()
         ->and($attrs->firstWhere('key', 'spectra.model_type')['value']['stringValue'])->toBe('text')
         ->and($attrs->firstWhere('key', 'spectra.pricing_tier')['value']['stringValue'])->toBe('standard')
         ->and($attrs->firstWhere('key', 'spectra.trackable.type')['value']['stringValue'])->toBe('App\\Models\\User')
         ->and($attrs->firstWhere('key', 'spectra.trackable.id')['value']['stringValue'])->toBe('42')
         ->and($attrs->firstWhere('key', 'spectra.reasoning_effort')['value']['stringValue'])->toBe('high')
-        ->and($attrs->firstWhere('key', 'spectra.is_streaming')['value']['boolValue'])->toBeTrue()
         ->and($attrs->firstWhere('key', 'spectra.has_tool_calls')['value']['boolValue'])->toBeTrue()
         ->and($attrs->firstWhere('key', 'spectra.time_to_first_token_ms')['value']['intValue'])->toBe(200)
         ->and($attrs->firstWhere('key', 'spectra.tokens_per_second')['value']['doubleValue'])->toBe(33.33)

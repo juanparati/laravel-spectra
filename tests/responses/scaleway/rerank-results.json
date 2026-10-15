@@ -1,0 +1,33 @@
+{
+    "id": "rerank-a89e6d7b8b97492ea81569c65fbfff49",
+    "model": "qwen3-embedding-8b",
+    "usage": {
+        "total_tokens": 99
+    },
+    "results": [
+        {
+            "index": 1,
+            "document": {
+                "text": "Oceans can be sorted by size: Pacific, Atlantic, Indian",
+                "multi_modal": null
+            },
+            "relevance_score": 0.81
+        },
+        {
+            "index": 0,
+            "document": {
+                "text": "The Pacific is approximately 165 million km²",
+                "multi_modal": null
+            },
+            "relevance_score": 0.79
+        },
+        {
+            "index": 2,
+            "document": {
+                "text": "The Atlantic is a very large ocean.",
+                "multi_modal": null
+            },
+            "relevance_score": 0.6
+        }
+    ]
+}

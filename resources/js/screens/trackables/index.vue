@@ -12,7 +12,7 @@ import PageRangeHeader from '@/components/PageRangeHeader.vue';
 
 const router = useRouter();
 const route = useRoute();
-const { formatNumber, formatCurrency, formatDuration, formatDurationSeconds, apiRequest } = useHelpers();
+const { formatNumber, formatCompact, formatCurrency, formatDuration, formatDurationSeconds, apiRequest } = useHelpers();
 const { providers, loadProviders } = useProviders();
 const loading = useLoading();
 
@@ -200,19 +200,6 @@ const getInitials = (trackable) => {
     return name.charAt(0).toUpperCase();
 };
 
-const getTypeColor = (type) => {
-    const colors = {
-        'User': 'from-blue-500 to-indigo-500',
-        'Team': 'from-green-500 to-emerald-500',
-        'Organization': 'from-purple-500 to-violet-500',
-        'Project': 'from-orange-500 to-amber-500',
-        'Workspace': 'from-pink-500 to-rose-500',
-        'default': 'from-primary-500 to-purple-500',
-    };
-    const typeName = type.split('\\').pop();
-    return colors[typeName] || colors.default;
-};
-
 const usageSegments = (data) => {
     const segments = [];
     if (data.tokens) segments.push({ value: formatNumber(data.tokens), unit: 'tokens' });
@@ -224,6 +211,14 @@ const usageSegments = (data) => {
 };
 
 const layout = ref('full');
+
+// Media usage shown only when the period has that kind of traffic.
+const mediaCards = computed(() => [
+    { key: 'images', show: showImages.value && summary.value.total_images > 0, label: 'Images', value: formatNumber(summary.value.total_images), unit: summary.value.total_images === 1 ? 'image' : 'images' },
+    { key: 'videos', show: showVideos.value && summary.value.total_videos > 0, label: 'Videos', value: formatNumber(summary.value.total_videos), unit: summary.value.total_videos === 1 ? 'video' : 'videos' },
+    { key: 'tts', show: showTts.value && summary.value.total_tts_characters > 0, label: 'Text-to-speech', value: formatCompact(summary.value.total_tts_characters), unit: 'characters' },
+    { key: 'stt', show: showStt.value && summary.value.stt_duration_seconds > 0, label: 'Speech-to-text', value: formatDurationSeconds(summary.value.stt_duration_seconds), unit: 'audio' },
+].filter((card) => card.show));
 const showTokens = computed(() => ['full', 'text', 'embedding'].includes(layout.value));
 const showImages = computed(() => ['full', 'image'].includes(layout.value));
 const showVideos = computed(() => ['full', 'video'].includes(layout.value));
@@ -263,6 +258,7 @@ onUnmounted(() => {
         <!-- Header -->
         <PageRangeHeader
             title="Trackables"
+            subtitle="Usage and spend per user, team or any model you track"
             v-model:period="period"
             v-model:start-date="startDate"
             v-model:end-date="endDate"
@@ -270,84 +266,65 @@ onUnmounted(() => {
             @change="onRangeChange"
         />
 
-        <!-- Summary Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-            <StatCard label="Total Requests" gradient="from-primary-500 to-cyan-500" :loading="loading" :period-label="periodLabel">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(summary.total_requests) }}
-                    <span class="text-sm font-medium text-gray-400"> / {{ formatNumber(summary.total_trackables) }} trackables</span>
-                </div>
-            </StatCard>
-            <StatCard label="Total Cost" gradient="from-emerald-500 to-teal-500" :loading="loading" :period-label="periodLabel" skeleton-width="70%">
-                <div class="stat-value !mt-1 !text-[2rem]">{{ formatCurrency(summary.total_cost) }}</div>
-            </StatCard>
-            <StatCard v-if="showTokens" label="Tokens" gradient="from-violet-500 to-indigo-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(summary.total_tokens) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">tokens</span>
-                </div>
+        <!-- Headline numbers -->
+        <div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Trackables" :loading="loading">
+                <div class="stat-value">{{ formatNumber(summary.total_trackables) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Text + Embeddings</div>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ formatNumber(summary.total_requests) }} requests in total</div>
                 </template>
             </StatCard>
-            <StatCard v-if="showImages" label="Images Generated" gradient="from-fuchsia-500 to-pink-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(summary.total_images) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">images</span>
-                </div>
+            <StatCard label="Spend" :loading="loading" skeleton-width="70%">
+                <div class="stat-value">{{ formatCurrency(summary.total_cost) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ periodLabel }}</div>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                        <template v-if="summary.total_trackables">{{ formatCurrency(summary.total_cost / summary.total_trackables) }} per trackable on average</template>
+                        <template v-else>No spend in this period</template>
+                    </div>
                 </template>
             </StatCard>
-            <StatCard v-if="showVideos" label="Videos Generated" gradient="from-amber-500 to-orange-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(summary.total_videos) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">videos</span>
-                </div>
+            <StatCard v-if="showTokens" label="Tokens" :loading="loading" skeleton-width="50%">
+                <div class="stat-value" :title="formatNumber(summary.total_tokens) + ' tokens'">{{ formatCompact(summary.total_tokens) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ periodLabel }}</div>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">Input and output, text and embeddings</div>
                 </template>
             </StatCard>
-            <StatCard v-if="showTts" label="Text-to-Speech" gradient="from-cyan-500 to-blue-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatNumber(summary.total_tts_characters) }}
-                    <span class="text-sm font-medium text-gray-400 ml-1">chars</span>
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">{{ formatDurationSeconds(summary.tts_duration_seconds) }} synthesized</div>
+            <StatCard label="Average latency" :loading="loading" skeleton-width="40%">
+                <template #action>
+                    <button
+                        v-if="latencyByModelType.length"
+                        type="button"
+                        class="text-xs font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400"
+                        @click="openLatencyBreakdown"
+                    >
+                        By type
+                    </button>
                 </template>
-            </StatCard>
-            <StatCard v-if="showStt" label="Speech-to-Text" gradient="from-sky-500 to-indigo-500" :loading="loading" skeleton-width="50%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatDurationSeconds(summary.stt_duration_seconds) }}
-                </div>
+                <div class="stat-value">{{ formatDuration(summary.avg_latency) }}</div>
                 <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Total transcribed audio</div>
-                </template>
-            </StatCard>
-            <StatCard label="Avg Latency" gradient="from-rose-500 to-pink-500" :loading="loading" skeleton-width="40%">
-                <div class="stat-value !mt-1 !text-[2rem]">
-                    {{ formatDuration(summary.avg_latency) }}
-                    <template v-if="latencyByModelType.length">
-                        <span class="text-sm font-medium text-gray-400"> / </span>
-                        <button
-                            type="button"
-                            class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                            @click="openLatencyBreakdown"
-                        >
-                            stats
-                        </button>
-                    </template>
-                </div>
-                <template #footer>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 uppercase tracking-wider">Across successful requests</div>
+                    <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">Across successful requests</div>
                 </template>
             </StatCard>
         </div>
 
+        <!-- Media usage (only kinds that appear in this period) -->
+        <div
+            v-if="!loading && mediaCards.length"
+            class="card mb-4 grid grid-cols-1 divide-y divide-gray-100 sm:divide-x sm:divide-y-0 dark:divide-gray-800"
+            :class="{ 1: 'sm:grid-cols-1', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-4' }[mediaCards.length]"
+        >
+            <div v-for="card in mediaCards" :key="card.key" class="px-5 py-3.5">
+                <div class="stat-label">{{ card.label }}</div>
+                <div class="mt-0.5 flex items-baseline gap-1.5">
+                    <span class="text-lg font-semibold tracking-tight text-gray-900 tabular-nums dark:text-white">{{ card.value }}</span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ card.unit }}</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Filters -->
-        <div class="card mb-6">
-            <div class="card-body">
+        <div class="card mb-4">
+            <div class="px-4 py-3.5">
                 <RequestFilters
                     v-model:filters="filters"
                     :providers="providers"
@@ -397,22 +374,22 @@ onUnmounted(() => {
                     </thead>
                     <tbody>
                         <template v-if="loading">
-                            <tr v-for="i in 10" :key="i" class="border-b border-gray-100 dark:border-gray-700/50">
+                            <tr v-for="i in 10" :key="i" class="border-b border-gray-100 dark:border-gray-800">
                                 <td class="px-5 py-4">
                                     <div class="flex items-center gap-3">
-                                        <div class="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
+                                        <div class="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-800 animate-pulse"></div>
                                         <div>
-                                            <div class="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-1"></div>
-                                            <div class="h-3 w-24 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                                            <div class="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded animate-pulse mb-1"></div>
+                                            <div class="h-3 w-24 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"></div>
                                         </div>
                                     </div>
                                 </td>
-                                <td class="px-5 py-4"><div class="h-6 w-16 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse"></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-12 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-16 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-14 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-14 bg-gray-200 dark:bg-gray-700 rounded animate-pulse ml-auto"></div></td>
-                                <td class="px-5 py-4"><div class="h-4 w-20 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div></td>
+                                <td class="px-5 py-4"><div class="h-6 w-16 bg-gray-200 dark:bg-gray-800 rounded-full animate-pulse"></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-12 bg-gray-200 dark:bg-gray-800 rounded animate-pulse ml-auto"></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-16 bg-gray-200 dark:bg-gray-800 rounded animate-pulse ml-auto"></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-14 bg-gray-200 dark:bg-gray-800 rounded animate-pulse ml-auto"></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-14 bg-gray-200 dark:bg-gray-800 rounded animate-pulse ml-auto"></div></td>
+                                <td class="px-5 py-4"><div class="h-4 w-20 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"></div></td>
                             </tr>
                         </template>
                         <template v-else>
@@ -424,7 +401,7 @@ onUnmounted(() => {
                             >
                                 <td>
                                     <div class="flex items-center gap-3">
-                                        <div :class="['w-10 h-10 rounded-full bg-gradient-to-br flex items-center justify-center text-white font-bold', getTypeColor(trackable.trackable_type)]">
+                                        <div :class="['flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600 ring-1 ring-inset ring-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700']">
                                             {{ getInitials(trackable) }}
                                         </div>
                                         <div>
@@ -476,10 +453,10 @@ onUnmounted(() => {
             </div>
 
             <!-- Pagination -->
-            <div class="card-body border-t border-gray-100 dark:border-gray-700">
+            <div class="card-body border-t border-gray-100 dark:border-gray-800">
                 <div class="flex items-center justify-between">
                     <div class="text-sm text-gray-500 dark:text-gray-400">
-                        <span v-if="loading" class="inline-block w-48 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></span>
+                        <span v-if="loading" class="inline-block w-48 h-4 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"></span>
                         <span v-else>
                             Showing page <span class="font-medium text-gray-700 dark:text-gray-300">{{ pagination.current_page }}</span>
                             of <span class="font-medium text-gray-700 dark:text-gray-300">{{ pagination.last_page }}</span>
@@ -520,7 +497,7 @@ onUnmounted(() => {
             @click="closeLatencyBreakdown"
         >
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden" @click.stop>
-                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-4">
+                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-start justify-between gap-4">
                     <div>
                         <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Average Latency by Model Type</h3>
                         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ periodLabel }}</p>

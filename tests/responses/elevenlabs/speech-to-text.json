@@ -1,0 +1,33 @@
+{
+    "language_code": "en",
+    "language_probability": 0.98,
+    "text": "Hello world!",
+    "words": [
+        {
+            "text": "Hello",
+            "start": 0.0,
+            "end": 0.5,
+            "type": "word",
+            "speaker_id": "speaker_1",
+            "logprob": -0.124
+        },
+        {
+            "text": " ",
+            "start": 0.5,
+            "end": 0.5,
+            "type": "spacing",
+            "speaker_id": "speaker_1",
+            "logprob": 0.0
+        },
+        {
+            "text": "world!",
+            "start": 0.5,
+            "end": 1.2,
+            "type": "word",
+            "speaker_id": "speaker_1",
+            "logprob": -0.089
+        }
+    ],
+    "transcription_id": "tr_9fK2mQ7xLp",
+    "audio_duration_secs": 90.0
+}

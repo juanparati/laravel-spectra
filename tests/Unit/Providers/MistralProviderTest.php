@@ -6,6 +6,7 @@ use Spectra\Data\Metrics;
 use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
 use Spectra\Providers\Mistral\Handlers\ChatHandler;
+use Spectra\Providers\Mistral\Handlers\OcrHandler;
 use Spectra\Support\ProviderRegistry;
 
 it('returns mistral as provider', function () {
@@ -24,6 +25,18 @@ it('resolves chat handler for mistral endpoint', function () {
     $handler = $this->mistralProvider()->resolveHandler('/v1/chat/completions');
 
     expect($handler)->toBeInstanceOf(ChatHandler::class);
+});
+
+it('resolves the ocr handler', function () {
+    expect($this->mistralProvider()->resolveHandler('/v1/ocr'))->toBeInstanceOf(OcrHandler::class);
+});
+
+it('reads cache hits from every usage field Mistral uses', function () {
+    $handler = new ChatHandler;
+
+    expect($handler->tokensFromUsage(['prompt_tokens' => 100, 'completion_tokens' => 1, 'prompt_tokens_details' => ['cached_tokens' => 40]])->cachedTokens)->toBe(40)
+        ->and($handler->tokensFromUsage(['prompt_tokens' => 100, 'completion_tokens' => 1, 'prompt_token_details' => ['cached_tokens' => 30]])->cachedTokens)->toBe(30)
+        ->and($handler->tokensFromUsage(['prompt_tokens' => 100, 'completion_tokens' => 1, 'num_cached_tokens' => 20])->cachedTokens)->toBe(20);
 });
 
 it('chat handler returns text model type', function () {

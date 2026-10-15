@@ -5,32 +5,90 @@ declare(strict_types=1);
 namespace Spectra\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Storage;
 use Spectra\Models\SpectraDailyStat;
 use Spectra\Models\SpectraRequest;
 use Symfony\Component\Console\Attribute\AsCommand;
+use Throwable;
 
+/**
+ * Deletes old request rows (and the media files stored for them).
+ *
+ * Daily stats are the long-term history behind the dashboard charts, so they
+ * are kept unless --stats-days is given.
+ */
 #[AsCommand(name: 'spectra:prune')]
 class PruneCommand extends Command
 {
-    protected $signature = 'spectra:prune {--hours=24 : The number of hours to retain Spectra data}';
+    protected $signature = 'spectra:prune
+        {--hours=24 : Keep requests from the last N hours}
+        {--stats-days= : Also delete daily stats older than N days (kept by default)}
+        {--chunk=1000 : Rows deleted per query}';
 
     protected $description = 'Prune stale entries from the Spectra database';
 
     public function handle(): int
     {
-        $hours = (int) $this->option('hours');
-        $cutoff = now()->subHours($hours);
+        $cutoff = now()->subHours(max(0, (int) $this->option('hours')));
+        $chunk = max(1, (int) $this->option('chunk'));
 
-        $requestCount = SpectraRequest::query()
-            ->where('created_at', '<', $cutoff)
-            ->delete();
+        $requestCount = 0;
+        $fileCount = 0;
 
-        $statsCount = SpectraDailyStat::query()
-            ->where('date', '<', $cutoff->toDateString())
-            ->delete();
+        // Delete in chunks so a large table isn't locked by one huge query.
+        do {
+            $requests = SpectraRequest::query()
+                ->where('created_at', '<', $cutoff)
+                ->limit($chunk)
+                ->get(['id', 'media_storage_path']);
 
-        $this->info("{$requestCount} requests and {$statsCount} daily stats pruned.");
+            $fileCount += $this->deleteMedia($requests->pluck('media_storage_path')->all());
+
+            $deleted = $requests->isEmpty()
+                ? 0
+                : SpectraRequest::query()->whereKey($requests->modelKeys())->delete();
+
+            $requestCount += $deleted;
+        } while ($deleted > 0);
+
+        $statsCount = 0;
+        $statsDays = $this->option('stats-days');
+
+        if ($statsDays !== null && $statsDays !== '') {
+            $statsCount = SpectraDailyStat::query()
+                ->where('date', '<', now()->subDays(max(0, (int) $statsDays))->toDateString())
+                ->delete();
+        }
+
+        $this->info("{$requestCount} requests, {$fileCount} media files and {$statsCount} daily stats pruned.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @param  array<int, mixed>  $paths  media_storage_path values (lists of disk paths)
+     */
+    protected function deleteMedia(array $paths): int
+    {
+        $files = collect($paths)
+            ->filter(fn ($value) => is_array($value))
+            ->flatten()
+            ->filter(fn ($path) => is_string($path) && $path !== '')
+            ->values()
+            ->all();
+
+        if ($files === []) {
+            return 0;
+        }
+
+        try {
+            Storage::disk(config('spectra.storage.media.disk'))->delete($files);
+        } catch (Throwable $e) {
+            report($e);
+
+            return 0;
+        }
+
+        return count($files);
     }
 }

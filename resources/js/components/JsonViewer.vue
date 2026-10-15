@@ -90,11 +90,11 @@ const copy = async (text) => {
 
 <style scoped>
 .json-viewer {
-    @apply overflow-hidden border border-gray-200 dark:border-gray-700;
+    @apply overflow-hidden border border-gray-200 dark:border-gray-800;
 }
 
 .json-viewer-header {
-    @apply flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700;
+    @apply flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-800;
 }
 
 .json-viewer-title {

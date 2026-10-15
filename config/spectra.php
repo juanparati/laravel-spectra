@@ -514,12 +514,31 @@ return [
         | Currency
         |--------------------------------------------------------------------------
         |
-        | The currency code for cost display. All costs are stored in cents
-        | of this currency. Only affects display; does not convert prices.
+        | The currency costs are reported and stored in (cents of this
+        | currency). Catalog prices written in another currency (Scaleway
+        | bills in EUR) and costs that providers report in USD are converted
+        | with the exchange rates below.
         |
         */
 
         'currency' => 'USD',
+
+        /*
+        |--------------------------------------------------------------------------
+        | Exchange Rates
+        |--------------------------------------------------------------------------
+        |
+        | How many units of the reporting currency one unit of another
+        | currency is worth, e.g. ['EUR' => 1.17] when reporting in USD, or
+        | ['USD' => 0.86] when reporting in EUR. A missing rate counts as 1:1
+        | and Spectra logs a warning once per process. Update the rates now
+        | and then; Spectra does not fetch them.
+        |
+        */
+
+        'exchange_rates' => [
+            // 'EUR' => 1.17,
+        ],
 
         /*
         |--------------------------------------------------------------------------
@@ -541,11 +560,11 @@ return [
         | Per-provider configuration for cost calculation. Each provider can have
         | its own settings that affect pricing.
         |
-        | OpenAI supports pricing tiers:
-        | - 'batch': Lowest price, for async processing with up to 24-hour turnaround
-        | - 'flex': Lower price with higher latency, for flexible workloads
-        | - 'standard': Regular pricing, standard latency (default)
-        | - 'priority': Higher price for faster processing and guaranteed capacity
+        | `default_tier` is used when neither the request nor the response says
+        | which tier served it, and you didn't set one with
+        | Spectra::withPricingTier(). Tiers: 'standard' (default), 'batch',
+        | 'flex', 'priority' (OpenAI "Fast"), 'fast' (Anthropic fast mode),
+        | 'ultrafast', 'hd'. Any provider slug may be listed here.
         |
         */
 

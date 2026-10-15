@@ -9,13 +9,23 @@ use Spectra\Concerns\MatchesEndpoints;
 use Spectra\Contracts\ExtractsModelFromResponse;
 use Spectra\Contracts\Handler;
 use Spectra\Contracts\HasMedia;
+use Spectra\Contracts\StreamsResponse;
 use Spectra\Data\ImageMetrics;
 use Spectra\Data\Metrics;
-use Spectra\Data\TokenMetrics;
 use Spectra\Enums\ModelType;
+use Spectra\Providers\OpenAI\OpenAiUsage;
 use Spectra\Providers\OpenAI\StoresOpenAiImageMedia;
+use Spectra\Providers\OpenAI\Streaming\ImageStreaming;
+use Spectra\Support\Tracking\StreamHandler;
 
-class ImageHandler implements ExtractsModelFromResponse, Handler, HasMedia
+/**
+ * Images API: generations, edits and variations.
+ *
+ * GPT Image models are priced per token (text and image input, image
+ * output); DALL-E models per image, with HD quality as the `hd` tier. The
+ * response has no `model` field, so the model comes from the request.
+ */
+class ImageHandler implements ExtractsModelFromResponse, Handler, HasMedia, StreamsResponse
 {
     use ExtractsModelField;
     use MatchesEndpoints;
@@ -41,27 +51,19 @@ class ImageHandler implements ExtractsModelFromResponse, Handler, HasMedia
      */
     public function extractMetrics(array $requestData, array $responseData): Metrics
     {
-        $usage = $responseData['usage'] ?? [];
-        $inputTokens = (int) ($usage['input_tokens'] ?? 0);
-        $outputTokens = (int) ($usage['output_tokens'] ?? 0);
+        $usage = is_array($responseData['usage'] ?? null) ? $responseData['usage'] : [];
+        $tokens = OpenAiUsage::fromImages($usage);
 
         return new Metrics(
-            tokens: ($inputTokens + $outputTokens) > 0
-                ? new TokenMetrics(
-                    promptTokens: $inputTokens,
-                    completionTokens: $outputTokens,
-                )
-                : null,
+            tokens: $tokens->totalTokens() > 0 ? $tokens : null,
             image: new ImageMetrics(
-                count: isset($responseData['data']) ? count($responseData['data']) : 0,
+                count: isset($responseData['data']) && is_array($responseData['data']) ? count($responseData['data']) : 0,
             ),
         );
     }
 
-    /**
-     * DALL-E responses don't include model in the response body,
-     * so we fall back to the request data's model field.
-     *
-     * @param  array<string, mixed>  $response
-     */
+    public function streamingHandler(): StreamHandler
+    {
+        return new ImageStreaming;
+    }
 }
