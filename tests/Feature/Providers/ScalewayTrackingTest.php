@@ -87,12 +87,12 @@ it('counts euro prices one to one when no exchange rate is set', function () {
     expect(SpectraRequest::sole()->total_cost_in_cents)->toEqualWithDelta(0.582, 0.000001);
 });
 
-it('records a streamed chat completion with cached tokens', function () {
+it('records a streamed chat completion with cached tokens', function (string $path) {
     $sse = file_get_contents(__DIR__.'/../../responses/scaleway/chat-stream.txt');
 
     Http::fake(['api.scaleway.ai/*' => Http::response($sse, 200, ['Content-Type' => 'text/event-stream'])]);
 
-    $response = Http::post('https://api.scaleway.ai/v1/chat/completions', [
+    $response = Http::post("https://api.scaleway.ai{$path}", [
         'model' => 'qwen3.8-27b',
         'stream' => true,
         'stream_options' => ['include_usage' => true],
@@ -105,13 +105,17 @@ it('records a streamed chat completion with cached tokens', function () {
 
     // qwen3.8-27b, EUR cents per 1M: (1,000 × 60 + 1,000 cached × 12 + 100 × 330) / 1M = 0.105
     expect($record->is_streaming)->toBeTrue()
+        ->and($record->endpoint)->toBe($path)
         ->and($record->model)->toBe('Qwen 3.8 27B')
         ->and($record->prompt_tokens)->toBe(2000)
         ->and($record->cached_tokens)->toBe(1000)
         ->and($record->completion_tokens)->toBe(100)
         ->and($record->finish_reason)->toBe('stop')
         ->and($record->total_cost_in_cents)->toEqualWithDelta(0.105, 0.000001);
-});
+})->with([
+    'default address' => '/v1/chat/completions',
+    'project address' => '/a1b2c3d4-e5f6-7890-abcd-ef1234567890/v1/chat/completions',
+]);
 
 it('records a streamed responses api call from its completed event', function () {
     $sse = file_get_contents(__DIR__.'/../../responses/scaleway/responses-stream.txt');
