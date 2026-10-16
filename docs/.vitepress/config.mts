@@ -10,10 +10,10 @@ export default defineConfig({
     },
     siteTitle: false,
     nav: [
+      { text: 'Hire Me', link: 'https://mayahi.net/services' },
       { text: 'Home', link: '/' },
       { text: 'Documentation', link: '/introduction' },
-      { text: 'Configuration', link: '/configuration' },
-      { text: 'Hire Me', link: 'https://mayahi.net/services' }
+      { text: 'Configuration', link: '/configuration' }
     ],
 
     sidebar: [
