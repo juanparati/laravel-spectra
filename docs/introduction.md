@@ -35,4 +35,4 @@ You can also add support for additional providers by creating a custom provider 
 
 ## Hire Me
 
-Need help integrating Spectra, tracking AI costs, or building AI-powered features into your Laravel application? I'm available for consulting and development work — see [my services at mayahi.net](https://mayahi.net/services).
+I'm available for consulting and development work — see [my services at mayahi.net](https://mayahi.net/services).
