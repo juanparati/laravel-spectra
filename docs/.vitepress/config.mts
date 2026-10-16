@@ -12,7 +12,8 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Documentation', link: '/introduction' },
-      { text: 'Configuration', link: '/configuration' }
+      { text: 'Configuration', link: '/configuration' },
+      { text: 'Hire Me', link: 'https://mayahi.net/services' }
     ],
 
     sidebar: [

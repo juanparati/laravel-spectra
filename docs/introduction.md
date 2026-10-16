@@ -32,3 +32,7 @@ You can also add support for additional providers by creating a custom provider 
 - **Flexible persistence** &mdash; Persist records synchronously, after the HTTP response, or via a queue job depending on your latency requirements.
 - **OpenTelemetry integration** &mdash; Export AI request traces to any OTLP-compatible backend for correlation with your existing observability infrastructure.
 - **Extensible** &mdash; Add custom provider support by implementing a handler class and registering it in the configuration.
+
+## Hire Me
+
+Need help integrating Spectra, tracking AI costs, or building AI-powered features into your Laravel application? I'm available for consulting and development work — see [my services at mayahi.net](https://mayahi.net/services).

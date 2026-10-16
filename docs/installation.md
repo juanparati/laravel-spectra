@@ -129,3 +129,7 @@ Run migrations on the separate connection with:
 ```shell
 php artisan migrate --database=spectra
 ```
+
+## Hire Me
+
+Need help setting up Spectra or building AI-powered features into your Laravel application? I'm available for consulting and development work — see [my services at mayahi.net](https://mayahi.net/services).
