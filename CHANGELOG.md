@@ -2,6 +2,12 @@
 
 All notable changes to `laravel-spectra` will be documented in this file.
 
+## v2.0.1 - 2026-10-19
+
+#### Fixed
+
+- Migrations failed with "relation already exists" when Spectra used a dedicated `spectra.storage.connection`: the app's `migrate:fresh` only drops tables on the default connection, so the Spectra tables survived while the migrations showed as pending. Both migrations now skip tables and columns that already exist
+
 ## v2.0.0 - 2026-10-15
 
 Spectra 2.0 fixes how requests are tracked and priced, updates every pricing
