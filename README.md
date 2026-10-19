@@ -15,9 +15,9 @@
 
 Spectra is a comprehensive Laravel package for AI observability. It helps you track AI requests, measure usage, calculate costs across different pricing units, enforce budgets, and inspect AI operations through a unified dashboard and API. This lets you focus on shipping reliable AI features without getting buried in provider-specific operational complexity.
 
-## Hire Me
-
-I'm available for consulting and development work — see [my services at mayahi.net](https://mayahi.net/services).
+<p align="center">
+  <a href="https://mayahi.net/services"><img alt="Hire me — I'm available for consulting and development work" src="art/hire-me.svg" width="100%" /></a>
+</p>
 
 ## Official Documentation
 
