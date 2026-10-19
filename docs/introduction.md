@@ -1,3 +1,5 @@
+<a href="https://mayahi.net/services" target="_blank" rel="noopener"><img src="/images/hire-me.svg" alt="Hire me — I'm available for consulting and development work" style="width: 100%; margin-bottom: 24px;" /></a>
+
 # Introduction
 
 [Laravel Spectra](https://github.com/spectra-php/laravel-spectra) is a comprehensive observability package for AI and LLM operations in Laravel applications. It intercepts outgoing requests to AI providers, extracts usage metrics such as token counts and media quantities, calculates costs from a built-in pricing catalog, and persists analytics-ready records that power a built-in real-time dashboard.
@@ -32,7 +34,3 @@ You can also add support for additional providers by creating a custom provider 
 - **Flexible persistence** &mdash; Persist records synchronously, after the HTTP response, or via a queue job depending on your latency requirements.
 - **OpenTelemetry integration** &mdash; Export AI request traces to any OTLP-compatible backend for correlation with your existing observability infrastructure.
 - **Extensible** &mdash; Add custom provider support by implementing a handler class and registering it in the configuration.
-
-## Hire Me
-
-I'm available for consulting and development work — see [my services at mayahi.net](https://mayahi.net/services).

@@ -1,3 +1,5 @@
+<a href="https://mayahi.net/services" target="_blank" rel="noopener"><img src="/images/hire-me.svg" alt="Hire me — I'm available for consulting and development work" style="width: 100%; margin-bottom: 24px;" /></a>
+
 # Installation
 
 ## Requirements
@@ -129,7 +131,3 @@ Run migrations on the separate connection with:
 ```shell
 php artisan migrate --database=spectra
 ```
-
-## Hire Me
-
-I'm available for consulting and development work — see [my services at mayahi.net](https://mayahi.net/services).

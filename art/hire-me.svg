@@ -1,5 +1,5 @@
 <svg width="1200" height="380" viewBox="0 0 1200 380" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <title>Hire me — Ahmad Mayahi, creator of Spectra, is available for consulting and development work</title>
+    <title>Hire me: Ahmad Mayahi, creator of Spectra, is available for consulting and development work</title>
     <defs>
         <clipPath id="card">
             <rect width="1200" height="380" rx="24" />
@@ -19,12 +19,6 @@
             <stop offset="1" stop-color="#6366F1" />
         </linearGradient>
 
-        <linearGradient id="word" x1="355" y1="0" x2="520" y2="0" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#F68B1E" />
-            <stop offset="0.35" stop-color="#FFD200" />
-            <stop offset="0.7" stop-color="#4DB748" />
-            <stop offset="1" stop-color="#00AEEF" />
-        </linearGradient>
 
         <linearGradient id="button" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0">
@@ -114,7 +108,7 @@
     <rect x="0.5" y="0.5" width="1199" height="379" rx="23.5" stroke="#FFFFFF" stroke-opacity="0.08" />
 
     <!-- Copy -->
-    <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif">
+    <g font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
         <!-- Availability pill -->
         <rect x="64" y="52" width="244" height="36" rx="18" fill="#4DB748" fill-opacity="0.12" stroke="#4DB748" stroke-opacity="0.4" />
         <circle cx="86" cy="70" r="9" fill="#4DB748" opacity="0.3">
@@ -127,19 +121,20 @@
         <!-- Headline -->
         <text fill="#FFFFFF" font-size="50" font-weight="700" letter-spacing="-1">
             <tspan x="62" y="150">Need a hand shipping</tspan>
-            <tspan x="62" y="210">AI features in <tspan fill="url(#word)">Laravel</tspan>?</tspan>
+            <tspan x="62" y="210">AI features in <tspan fill="#F68B1E">L</tspan><tspan fill="#FBA51A">a</tspan><tspan fill="#FFD200">r</tspan><tspan fill="#A8C93A">a</tspan><tspan fill="#4DB748">v</tspan><tspan fill="#27B29C">e</tspan><tspan fill="#00AEEF">l</tspan>?</tspan>
         </text>
 
         <!-- Subheading -->
-        <text fill="#A3A9BC" font-size="21">
-            <tspan x="64" y="256">I'm Ahmad Mayahi, creator of Spectra — available for</tspan>
+        <text fill="#B9BED0" font-size="21">
+            <tspan x="64" y="256">I'm Ahmad Mayahi, creator of Spectra, and I'm available for</tspan>
             <tspan x="64" y="285">consulting and development work.</tspan>
         </text>
 
         <!-- Button -->
         <rect x="64" y="310" width="172" height="48" rx="24" fill="url(#button)" />
         <rect x="66" y="312" width="168" height="44" rx="22" fill="#0E1220" />
-        <text x="150" y="341" text-anchor="middle" fill="#FFFFFF" font-size="18" font-weight="600">Hire me  →</text>
-        <text x="256" y="341" fill="#6B7187" font-size="17" font-weight="500">mayahi.net/services</text>
+        <text x="138" y="341" text-anchor="middle" fill="#FFFFFF" font-size="18" font-weight="600">Hire me</text>
+        <path d="M181 335 H197 M191 329 L197 335 L191 341" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+        <text x="256" y="341" fill="#9AA0B6" font-size="17" font-weight="500">mayahi.net/services</text>
     </g>
 </svg>

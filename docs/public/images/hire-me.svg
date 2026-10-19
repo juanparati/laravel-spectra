@@ -1,0 +1,140 @@
+<svg width="1200" height="380" viewBox="0 0 1200 380" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <title>Hire me: Ahmad Mayahi, creator of Spectra, is available for consulting and development work</title>
+    <defs>
+        <clipPath id="card">
+            <rect width="1200" height="380" rx="24" />
+        </clipPath>
+
+        <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="380" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#0B0E17" />
+            <stop offset="1" stop-color="#111527" />
+        </linearGradient>
+
+        <linearGradient id="spectrum" x1="0" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#E31E24" />
+            <stop offset="0.2" stop-color="#F68B1E" />
+            <stop offset="0.4" stop-color="#FFD200" />
+            <stop offset="0.6" stop-color="#4DB748" />
+            <stop offset="0.8" stop-color="#00AEEF" />
+            <stop offset="1" stop-color="#6366F1" />
+        </linearGradient>
+
+
+        <linearGradient id="button" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0">
+                <animate attributeName="stop-color" values="#E31E24;#F68B1E;#FFD200;#4DB748;#00AEEF;#6366F1;#E31E24" dur="8s" repeatCount="indefinite" />
+            </stop>
+            <stop offset="0.5">
+                <animate attributeName="stop-color" values="#FFD200;#4DB748;#00AEEF;#6366F1;#E31E24;#F68B1E;#FFD200" dur="8s" repeatCount="indefinite" />
+            </stop>
+            <stop offset="1">
+                <animate attributeName="stop-color" values="#00AEEF;#6366F1;#E31E24;#F68B1E;#FFD200;#4DB748;#00AEEF" dur="8s" repeatCount="indefinite" />
+            </stop>
+        </linearGradient>
+
+        <linearGradient id="beam" x1="760" y1="0" x2="922" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#FFFFFF" stop-opacity="0" />
+            <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.95" />
+        </linearGradient>
+
+        <linearGradient id="prism" x1="960" y1="80" x2="960" y2="262" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16" />
+            <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.04" />
+        </linearGradient>
+
+        <radialGradient id="glowWarm" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1120 120) scale(360 240)">
+            <stop offset="0" stop-color="#F68B1E" stop-opacity="0.22" />
+            <stop offset="1" stop-color="#F68B1E" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="glowCool" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1080 360) scale(420 220)">
+            <stop offset="0" stop-color="#00AEEF" stop-opacity="0.18" />
+            <stop offset="1" stop-color="#00AEEF" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="glowLeft" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(40 0) scale(520 260)">
+            <stop offset="0" stop-color="#6366F1" stop-opacity="0.16" />
+            <stop offset="1" stop-color="#6366F1" stop-opacity="0" />
+        </radialGradient>
+
+        <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+            <path d="M32 0H0V32" stroke="#FFFFFF" stroke-opacity="0.035" />
+        </pattern>
+
+        <filter id="soft" x="-20%" y="-50%" width="140%" height="200%">
+            <feGaussianBlur stdDeviation="6" />
+        </filter>
+    </defs>
+
+    <g clip-path="url(#card)">
+        <!-- Background -->
+        <rect width="1200" height="380" fill="url(#bg)" />
+        <rect width="1200" height="380" fill="url(#grid)" />
+        <rect width="1200" height="380" fill="url(#glowLeft)" />
+        <rect width="1200" height="380" fill="url(#glowWarm)" />
+        <rect width="1200" height="380" fill="url(#glowCool)" />
+
+        <!-- Prism: white light in, spectrum out -->
+        <g>
+            <path d="M760 208 L922 166" stroke="url(#beam)" stroke-width="3" stroke-linecap="round" />
+            <path d="M760 208 L922 166" stroke="url(#beam)" stroke-width="10" stroke-linecap="round" opacity="0.35" filter="url(#soft)" />
+
+            <g opacity="0.9">
+                <animate attributeName="opacity" values="0.75;1;0.75" dur="5s" repeatCount="indefinite" />
+                <g filter="url(#soft)" opacity="0.7">
+                    <path d="M1001 164 L1200 118 L1200 152 Z" fill="#E31E24" />
+                    <path d="M1001 166 L1200 152 L1200 186 Z" fill="#F68B1E" />
+                    <path d="M1001 168 L1200 186 L1200 220 Z" fill="#FFD200" />
+                    <path d="M1001 170 L1200 220 L1200 254 Z" fill="#4DB748" />
+                    <path d="M1001 172 L1200 254 L1200 288 Z" fill="#00AEEF" />
+                    <path d="M1001 174 L1200 288 L1200 322 Z" fill="#6366F1" />
+                </g>
+                <path d="M1001 164 L1200 118 L1200 152 Z" fill="#E31E24" />
+                <path d="M1001 166 L1200 152 L1200 186 Z" fill="#F68B1E" />
+                <path d="M1001 168 L1200 186 L1200 220 Z" fill="#FFD200" />
+                <path d="M1001 170 L1200 220 L1200 254 Z" fill="#4DB748" />
+                <path d="M1001 172 L1200 254 L1200 288 Z" fill="#00AEEF" />
+                <path d="M1001 174 L1200 288 L1200 322 Z" fill="#6366F1" />
+            </g>
+
+            <path d="M922 166 L1001 169" stroke="#FFFFFF" stroke-opacity="0.5" stroke-width="2" />
+            <path d="M960 80 L1046 256 L874 256 Z" fill="url(#prism)" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="2" stroke-linejoin="round" />
+            <path d="M960 80 L874 256" stroke="#FFFFFF" stroke-opacity="0.9" stroke-width="2" stroke-linecap="round" />
+        </g>
+
+        <!-- Spectrum accent bar -->
+        <rect width="1200" height="6" fill="url(#spectrum)" />
+    </g>
+
+    <!-- Card outline -->
+    <rect x="0.5" y="0.5" width="1199" height="379" rx="23.5" stroke="#FFFFFF" stroke-opacity="0.08" />
+
+    <!-- Copy -->
+    <g font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+        <!-- Availability pill -->
+        <rect x="64" y="52" width="244" height="36" rx="18" fill="#4DB748" fill-opacity="0.12" stroke="#4DB748" stroke-opacity="0.4" />
+        <circle cx="86" cy="70" r="9" fill="#4DB748" opacity="0.3">
+            <animate attributeName="r" values="5;11;5" dur="2.4s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.5;0;0.5" dur="2.4s" repeatCount="indefinite" />
+        </circle>
+        <circle cx="86" cy="70" r="5" fill="#5FD35A" />
+        <text x="102" y="76" fill="#8BE086" font-size="16" font-weight="600" letter-spacing="1.6">AVAILABLE FOR HIRE</text>
+
+        <!-- Headline -->
+        <text fill="#FFFFFF" font-size="50" font-weight="700" letter-spacing="-1">
+            <tspan x="62" y="150">Need a hand shipping</tspan>
+            <tspan x="62" y="210">AI features in <tspan fill="#F68B1E">L</tspan><tspan fill="#FBA51A">a</tspan><tspan fill="#FFD200">r</tspan><tspan fill="#A8C93A">a</tspan><tspan fill="#4DB748">v</tspan><tspan fill="#27B29C">e</tspan><tspan fill="#00AEEF">l</tspan>?</tspan>
+        </text>
+
+        <!-- Subheading -->
+        <text fill="#B9BED0" font-size="21">
+            <tspan x="64" y="256">I'm Ahmad Mayahi, creator of Spectra, and I'm available for</tspan>
+            <tspan x="64" y="285">consulting and development work.</tspan>
+        </text>
+
+        <!-- Button -->
+        <rect x="64" y="310" width="172" height="48" rx="24" fill="url(#button)" />
+        <rect x="66" y="312" width="168" height="44" rx="22" fill="#0E1220" />
+        <text x="138" y="341" text-anchor="middle" fill="#FFFFFF" font-size="18" font-weight="600">Hire me</text>
+        <path d="M181 335 H197 M191 329 L197 335 L191 341" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+        <text x="256" y="341" fill="#9AA0B6" font-size="17" font-weight="500">mayahi.net/services</text>
+    </g>
+</svg>
