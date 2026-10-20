@@ -2,6 +2,12 @@
 
 All notable changes to `laravel-spectra` will be documented in this file.
 
+## v2.1.0 - 2026-10-20
+
+#### Added
+
+- OpenRouter embeddings (`/api/v1/embeddings`) and reranking (`/api/v1/rerank`) are now tracked. Previously these requests matched no handler and were recorded without tokens or cost. Embeddings record input tokens; reranking records search units and, when reported, tokens. Both take their cost from OpenRouter's reported `usage.cost`, including the upstream cost for BYOK, like chat requests
+
 ## v2.0.1 - 2026-10-19
 
 #### Fixed
