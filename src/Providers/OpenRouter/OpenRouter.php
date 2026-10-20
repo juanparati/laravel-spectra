@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Spectra\Providers\OpenRouter;
 
 use Spectra\Providers\OpenRouter\Handlers\ChatHandler;
+use Spectra\Providers\OpenRouter\Handlers\EmbeddingHandler;
 use Spectra\Providers\OpenRouter\Handlers\ImageGenerationHandler;
 use Spectra\Providers\OpenRouter\Handlers\ImageHandler;
+use Spectra\Providers\OpenRouter\Handlers\RerankHandler;
 use Spectra\Providers\OpenRouter\Handlers\VideoHandler;
 use Spectra\Providers\Provider;
 
@@ -38,6 +40,8 @@ class OpenRouter extends Provider
             app(ImageHandler::class),
             app(ImageGenerationHandler::class),
             app(VideoHandler::class),
+            app(EmbeddingHandler::class),
+            app(RerankHandler::class),
         ];
     }
 }

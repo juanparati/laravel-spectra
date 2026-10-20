@@ -227,3 +227,41 @@ it('records a streamed image api call from its completed event', function () {
         ->and($record->completion_tokens)->toBe(4160)
         ->and($record->total_cost_in_cents)->toEqualWithDelta(16.651, 0.000001);
 });
+
+it('records openrouter embeddings with the cost openrouter reports', function () {
+    Http::fake(['openrouter.ai/*' => Http::response($this->loadMockResponse('openrouter/embeddings.json'))]);
+
+    Http::post('https://openrouter.ai/api/v1/embeddings', [
+        'model' => 'qwen/qwen3-embedding-8b',
+        'input' => ['When does the contract renew?', 'Invoices are sent monthly.'],
+    ]);
+
+    $record = SpectraRequest::sole();
+
+    // usage.cost = $0.000012 → 0.0012 cents
+    expect($record->provider)->toBe('openrouter')
+        ->and($record->model_type)->toBe('embedding')
+        ->and($record->endpoint)->toBe('/api/v1/embeddings')
+        ->and($record->prompt_tokens)->toBe(1200)
+        ->and($record->completion_tokens)->toBe(0)
+        ->and($record->total_cost_in_cents)->toEqualWithDelta(0.0012, 0.0000001);
+});
+
+it('records openrouter reranks with the cost openrouter reports', function () {
+    Http::fake(['openrouter.ai/*' => Http::response($this->loadMockResponse('openrouter/rerank.json'))]);
+
+    Http::post('https://openrouter.ai/api/v1/rerank', [
+        'model' => 'cohere/rerank-4-pro',
+        'query' => 'When does the contract renew?',
+        'documents' => ['Invoices are sent monthly.', 'The office is closed on Sundays.', 'The contract renews every January.'],
+        'top_n' => 3,
+    ]);
+
+    $record = SpectraRequest::sole();
+
+    // usage.cost = $0.0025 → 0.25 cents
+    expect($record->provider)->toBe('openrouter')
+        ->and($record->endpoint)->toBe('/api/v1/rerank')
+        ->and($record->model)->toBe('cohere/rerank-4-pro')
+        ->and($record->total_cost_in_cents)->toEqualWithDelta(0.25, 0.0000001);
+});

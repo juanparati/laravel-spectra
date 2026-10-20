@@ -1,0 +1,15 @@
+{
+    "id": "gen-rr-1760000000-zY9xW8vU7tS6",
+    "model": "cohere/rerank-4-pro",
+    "provider": "Cohere",
+    "results": [
+        {"index": 2, "relevance_score": 0.91, "document": {"text": "The contract renews every January."}},
+        {"index": 0, "relevance_score": 0.42, "document": {"text": "Invoices are sent monthly."}},
+        {"index": 1, "relevance_score": 0.08, "document": {"text": "The office is closed on Sundays."}}
+    ],
+    "usage": {
+        "search_units": 1,
+        "total_tokens": 0,
+        "cost": 0.0025
+    }
+}

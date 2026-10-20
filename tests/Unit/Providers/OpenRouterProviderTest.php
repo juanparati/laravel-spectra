@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use Spectra\Providers\OpenRouter\Handlers\ChatHandler;
+use Spectra\Providers\OpenRouter\Handlers\EmbeddingHandler;
 use Spectra\Providers\OpenRouter\Handlers\ImageGenerationHandler;
 use Spectra\Providers\OpenRouter\Handlers\ImageHandler;
+use Spectra\Providers\OpenRouter\Handlers\RerankHandler;
 use Spectra\Providers\OpenRouter\Handlers\VideoHandler;
 use Spectra\Providers\OpenRouter\OpenRouter;
 
@@ -16,6 +18,8 @@ it('resolves a handler for each openrouter endpoint', function (string $endpoint
     'image api' => ['/api/v1/images', [], ImageGenerationHandler::class],
     'video submit' => ['/api/v1/videos', [], VideoHandler::class],
     'video poll' => ['/api/v1/videos/gen-vid-1', [], VideoHandler::class],
+    'embeddings' => ['/api/v1/embeddings', [], EmbeddingHandler::class],
+    'rerank' => ['/api/v1/rerank', [], RerankHandler::class],
 ]);
 
 it('does not track video downloads', function () {
