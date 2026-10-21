@@ -29,6 +29,13 @@ class Spectra
     /** @var array<int, string> */
     protected array $globalTags = [];
 
+    /**
+     * Tags of the withTags() callbacks running right now, outermost first.
+     *
+     * @var array<int, string>
+     */
+    protected array $scopedTags = [];
+
     protected ?string $globalTrackableType = null;
 
     protected string|int|null $globalTrackableId = null;
@@ -63,7 +70,7 @@ class Spectra
             ...$options,
             'provider' => $provider,
             'model' => $model,
-            'tags' => array_values(array_unique(array_merge($this->globalTags, $options['tags'] ?? []))),
+            'tags' => $this->mergedTags($options['tags'] ?? []),
             'metadata' => array_merge($this->globalMetadata, $options['metadata'] ?? []),
             'trackable_type' => $options['trackable_type'] ?? $this->globalTrackableType,
             'trackable_id' => $options['trackable_id'] ?? $this->globalTrackableId,
@@ -166,6 +173,41 @@ class Spectra
         $this->globalTags = array_merge($this->globalTags, $tags);
 
         return $this;
+    }
+
+    /**
+     * Tag the requests tracked while the callback runs, then drop the tags
+     * again. Calls nest: an inner call adds its tags to the outer ones.
+     * Unlike global tags, they apply only to the requests sent inside the
+     * callback, so one request or job can tag each of its AI calls apart.
+     *
+     * @template TReturn
+     *
+     * @param  array<int, string>  $tags
+     * @param  callable(): TReturn  $callback
+     * @return TReturn
+     */
+    public function withTags(array $tags, callable $callback): mixed
+    {
+        $previous = $this->scopedTags;
+        $this->scopedTags = array_merge($this->scopedTags, $tags);
+
+        try {
+            return $callback();
+        } finally {
+            $this->scopedTags = $previous;
+        }
+    }
+
+    /**
+     * The global and scoped tags, then the request's own, without repeats.
+     *
+     * @param  array<int, string>  $tags
+     * @return array<int, string>
+     */
+    protected function mergedTags(array $tags): array
+    {
+        return array_values(array_unique(array_merge($this->globalTags, $this->scopedTags, $tags)));
     }
 
     public function withPricingTier(string $tier): self
