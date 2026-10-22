@@ -8,6 +8,16 @@ All notable changes to `laravel-spectra` will be documented in this file.
 
 - Apps that opt into immutable dates with `Date::use(CarbonImmutable::class)` crashed on every dashboard request: the package type-hinted `Illuminate\Support\Carbon` but fed it values from `now()` and model datetime casts, which are then `Carbon\CarbonImmutable`. Date parameters, properties and return types now accept any `Carbon\CarbonInterface`. This also fixes OpenTelemetry span export, where the `instanceof` check silently turned every timestamp into `0`
 
+## v2.2.0 - 2026-10-21
+
+#### Added
+
+- `Spectra::withTags($tags, $callback)` tags only the requests sent while the callback runs, including the requests Spectra tracks by itself. Calls nest, and the outer tags come back when a call ends, even if it throws. One request or job can now tag each of its AI calls on its own
+
+#### Fixed
+
+- `SpectraFake::startRequest()` ignored global tags, and a request's own metadata replaced the global metadata instead of being merged with it
+
 ## v2.1.0 - 2026-10-20
 
 #### Added

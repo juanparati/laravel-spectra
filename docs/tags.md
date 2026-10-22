@@ -34,6 +34,23 @@ Spectra::track('openai', 'gpt-4o', fn () => ..., [
 ]);
 ```
 
+<a name="scoped-tags"></a>
+## Scoped Tags
+
+Spectra tracks most requests by itself, without `track()`. To tag those requests, wrap the code that sends them in `Spectra::withTags()`. The tags apply only to the requests sent inside the callback:
+
+```php
+use Spectra\Facades\Spectra;
+
+$summary = Spectra::withTags(['summary'], fn () => Http::withToken($key)
+    ->post('https://api.openai.com/v1/chat/completions', $payload)
+    ->json());
+```
+
+`withTags()` returns what the callback returns. Calls can nest: an inner call adds its tags to the outer ones, and the outer tags come back when it ends, even if the callback throws. A streamed response keeps the tags it was sent with, even when it is read after the callback ends.
+
+This lets one request or job tag each of its AI calls on its own. For example, a chat request can tag the follow-up rewrite, the search and the reply with different tags. Global tags would put the same tags on all of them.
+
 <a name="global-tags"></a>
 ## Global Tags
 
@@ -46,7 +63,7 @@ Spectra::addGlobalTags(['production', 'us-east-1', 'content-api']);
 // Every later tracked request in this request or job will include these tags
 ```
 
-Global tags are merged with any request-specific tags. Clear global tags earlier, for example in a long-running command, with:
+Global tags are merged with scoped and request-specific tags. Clear global tags earlier, for example in a long-running command, with:
 
 ```php
 Spectra::clearGlobals();

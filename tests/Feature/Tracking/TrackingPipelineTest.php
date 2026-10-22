@@ -271,6 +271,48 @@ it('merges per-request tags and metadata with the global ones', function () {
         ->and($context->metadata)->toBe(['env' => 'test', 'feature' => 'chat']);
 });
 
+it('tags only the requests sent inside withTags()', function () {
+    $reply = fn (string $id) => Http::response(['id' => $id, 'object' => 'chat.completion', 'model' => 'gpt-4o', 'choices' => [], 'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1]]);
+    Http::fake(['api.openai.com/*' => Http::sequence([$reply('chatcmpl-1'), $reply('chatcmpl-2')])]);
+    Spectra::addGlobalTags(['global']);
+
+    Spectra::withTags(['summary'], fn () => Http::post('https://api.openai.com/v1/chat/completions', ['model' => 'gpt-4o']));
+    Http::post('https://api.openai.com/v1/chat/completions', ['model' => 'gpt-4o']);
+
+    $tags = SpectraRequest::with('tags')->oldest('id')->get()
+        ->map(fn (SpectraRequest $row): array => $row->tags->pluck('name')->sort()->values()->all());
+
+    expect($tags->all())->toBe([['global', 'summary'], ['global']]);
+});
+
+it('keeps the tags of withTags() on a stream read after the callback', function () {
+    $response = Spectra::withTags(['reply'], fn () => streamedRequest(openAiStreamBody()));
+
+    $response->body();
+
+    expect(SpectraRequest::with('tags')->sole()->tags->pluck('name')->all())->toBe(['reply']);
+});
+
+it('nests withTags() calls and restores the outer tags, even after an exception', function () {
+    $seen = Spectra::withTags(['outer'], function () {
+        $inner = Spectra::withTags(['inner'], fn () => Spectra::startRequest('openai', 'gpt-4o')->tags);
+
+        try {
+            Spectra::withTags(['failing'], fn () => throw new RuntimeException('boom'));
+        } catch (RuntimeException) {
+        }
+
+        return [$inner, Spectra::startRequest('openai', 'gpt-4o')->tags];
+    });
+
+    expect($seen)->toBe([['outer', 'inner'], ['outer']])
+        ->and(Spectra::startRequest('openai', 'gpt-4o')->tags)->toBe([]);
+});
+
+it('returns the value of the withTags() callback', function () {
+    expect(Spectra::withTags(['x'], fn (): int => 42))->toBe(42);
+});
+
 it('keeps Spectra::stream() options when it takes over a tracked stream', function () {
     $tracker = Spectra::stream('openai', 'gpt-4o', ['tags' => ['wrapped'], 'metadata' => ['source' => 'manual']]);
     $response = streamedRequest(openAiStreamBody());

@@ -56,8 +56,9 @@ class SpectraFake extends Spectra
         return new RequestContext([
             'provider' => $provider,
             'model' => $model,
-            'metadata' => array_merge($this->globalMetadata, $options['metadata'] ?? []),
             ...$options,
+            'tags' => $this->mergedTags($options['tags'] ?? []),
+            'metadata' => array_merge($this->globalMetadata, $options['metadata'] ?? []),
         ]);
     }
 
