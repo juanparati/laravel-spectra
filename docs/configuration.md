@@ -300,6 +300,38 @@ Override the base URL for any provider. This is useful when routing requests thr
 
 When the `laravel-ai` package is installed, Spectra will also check its config (`ai.providers.{provider}.url`) as a fallback.
 
+<a name="azure-openai"></a>
+### Azure OpenAI
+
+Requests to Azure OpenAI and Azure AI Foundry resources are tracked as `openai` without any configuration. Spectra recognizes these hosts:
+
+- `{resource}.openai.azure.com`
+- `{resource}.cognitiveservices.azure.com`
+- `{resource}.services.ai.azure.com`
+
+Azure paths are mapped to the matching OpenAI endpoint before tracking, and the stored `endpoint` is the OpenAI path:
+
+| Azure path | Tracked as |
+| --- | --- |
+| `/openai/deployments/{deployment}/chat/completions` | `/v1/chat/completions` |
+| `/openai/v1/chat/completions` | `/v1/chat/completions` |
+| `/openai/responses` | `/v1/responses` |
+
+The model is taken from the response, because deployment requests don't name one. Costs use OpenAI's prices.
+
+If your Azure endpoint uses a custom domain (for example, an API Management gateway), add it as `endpoint_urls.azure`. Its host is detected as OpenAI, but unlike `endpoint_urls.openai` it is never used as the OpenAI client's base URL:
+
+```php
+'endpoint_urls' => [
+    'azure' => env('AZURE_OPENAI_URL'),
+],
+```
+
+With `laravel-ai`, the host of `ai.providers.azure.url` (`AZURE_OPENAI_URL`) is detected the same way, so no Spectra config is needed.
+
+> [!NOTE]
+> The Azure AI model inference API (`/models/chat/completions`) serves models from many vendors and is not tracked.
+
 <a name="integrations"></a>
 ## Integrations
 

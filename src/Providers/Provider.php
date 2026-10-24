@@ -37,6 +37,18 @@ abstract class Provider
     abstract public function handlers(): array;
 
     /**
+     * Rewrite a request path into the form this provider's endpoints use.
+     *
+     * Lets a provider be served under another path layout (Azure OpenAI's
+     * /openai/deployments/{deployment}/... for example). Called before
+     * endpoint matching; the path is returned unchanged by default.
+     */
+    public function normalizeEndpoint(string $path): string
+    {
+        return $path;
+    }
+
+    /**
      * @return Handler[]
      */
     protected function resolvedHandlers(): array

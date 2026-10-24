@@ -4,7 +4,7 @@ Every tracked request is classified into a **model type** that determines which 
 
 ## Supported Providers
 
-- OpenAI
+- OpenAI (including [Azure OpenAI](/configuration#azure-openai))
 - Anthropic
 - Google AI
 - Groq

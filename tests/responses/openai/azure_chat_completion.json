@@ -1,0 +1,52 @@
+{
+  "id": "chatcmpl-CAzure7f3kQ2mX9pL4vN8rT1sW6yB",
+  "object": "chat.completion",
+  "created": 1761300000,
+  "model": "gpt-4.1-2025-04-14",
+  "prompt_filter_results": [
+    {
+      "prompt_index": 0,
+      "content_filter_results": {
+        "hate": { "filtered": false, "severity": "safe" },
+        "self_harm": { "filtered": false, "severity": "safe" },
+        "sexual": { "filtered": false, "severity": "safe" },
+        "violence": { "filtered": false, "severity": "safe" }
+      }
+    }
+  ],
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The contract renews on 1 March.",
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "content_filter_results": {
+        "hate": { "filtered": false, "severity": "safe" },
+        "self_harm": { "filtered": false, "severity": "safe" },
+        "sexual": { "filtered": false, "severity": "safe" },
+        "violence": { "filtered": false, "severity": "safe" }
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1000,
+    "completion_tokens": 200,
+    "total_tokens": 1200,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "system_fingerprint": "fp_azure_4d2c9e"
+}

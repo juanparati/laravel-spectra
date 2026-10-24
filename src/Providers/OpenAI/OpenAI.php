@@ -32,7 +32,8 @@ class OpenAI extends Provider implements ExtractsPricingTierFromRequest, Extract
     }
 
     /**
-     * The global host plus the regional (data residency) hosts.
+     * The global host, the regional (data residency) hosts, and the Azure
+     * resource hosts. Azure requests are priced at OpenAI's rates.
      *
      * Regional endpoints add a 10% uplift for models released on or after
      * 2026-03-05; the uplift is not applied yet because the request host is
@@ -52,7 +53,26 @@ class OpenAI extends Provider implements ExtractsPricingTierFromRequest, Extract
             'kr.api.openai.com',
             'gb.api.openai.com',
             'ae.api.openai.com',
+            // Azure OpenAI and Azure AI Foundry resources
+            '{resource}.openai.azure.com',
+            '{resource}.cognitiveservices.azure.com',
+            '{resource}.services.ai.azure.com',
         ];
+    }
+
+    /**
+     * Map Azure OpenAI paths onto the OpenAI /v1 endpoints:
+     *   /openai/deployments/{deployment}/chat/completions => /v1/chat/completions
+     *   /openai/v1/responses                              => /v1/responses
+     *   /openai/responses (preview API)                   => /v1/responses
+     */
+    public function normalizeEndpoint(string $path): string
+    {
+        if (! str_starts_with($path, '/openai/')) {
+            return $path;
+        }
+
+        return (string) preg_replace('#^/openai(?:/deployments/[^/]+|/v1)?/#', '/v1/', $path);
     }
 
     /**

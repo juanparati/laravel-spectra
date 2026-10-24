@@ -33,6 +33,16 @@ class ApiKeyResolver
         'ollama' => ['spectra.endpoint_urls.ollama', 'services.ollama.url', 'ai.providers.ollama.url'],
     ];
 
+    /**
+     * URLs whose hosts are also detected as the provider but are never used
+     * as its base URL: Azure OpenAI serves the OpenAI API from its own hosts.
+     *
+     * @var array<string, array<int, string>>
+     */
+    protected array $additionalHostLookups = [
+        'openai' => ['spectra.endpoint_urls.azure', 'ai.providers.azure.url'],
+    ];
+
     public function resolve(string $provider): ?string
     {
         $chain = $this->lookupChains[$provider] ?? ["spectra.api_keys.{$provider}", "ai.providers.{$provider}.key"];
@@ -74,9 +84,39 @@ class ApiKeyResolver
      */
     public function resolveHost(string $provider): ?string
     {
-        $url = $this->resolveBaseUrl($provider);
+        return $this->hostFromUrl($this->resolveBaseUrl($provider));
+    }
 
-        if ($url === null) {
+    /**
+     * Get every custom host configured for a provider: the base URL's host
+     * plus the hosts of any additional URLs (such as laravel-ai's Azure URL).
+     *
+     * @return array<int, string>
+     */
+    public function resolveHosts(string $provider): array
+    {
+        $urls = [$this->resolveBaseUrl($provider)];
+
+        foreach ($this->additionalHostLookups[$provider] ?? [] as $configKey) {
+            $urls[] = config($configKey);
+        }
+
+        $hosts = [];
+
+        foreach ($urls as $url) {
+            $host = $this->hostFromUrl($url);
+
+            if ($host !== null && ! in_array($host, $hosts, true)) {
+                $hosts[] = $host;
+            }
+        }
+
+        return $hosts;
+    }
+
+    protected function hostFromUrl(mixed $url): ?string
+    {
+        if (! is_string($url) || $url === '') {
             return null;
         }
 

@@ -15,7 +15,8 @@ use Spectra\Providers\Provider;
  *
  * Custom endpoint URLs configured via spectra.endpoint_urls or laravel-ai's ai.providers.*.url
  * are automatically included as additional hosts for provider detection. This allows requests
- * routed through proxies or gateways to be detected and tracked correctly.
+ * routed through proxies or gateways to be detected and tracked correctly. The hosts of
+ * spectra.endpoint_urls.azure and laravel-ai's ai.providers.azure.url are detected as OpenAI.
  */
 class ProviderRegistry
 {
@@ -89,10 +90,10 @@ class ProviderRegistry
             $hosts = $instance->getHosts();
 
             if ($apiKeyResolver !== null) {
-                $customHost = $apiKeyResolver->resolveHost($slug);
-
-                if ($customHost !== null && ! in_array($customHost, $hosts)) {
-                    $hosts[] = $customHost;
+                foreach ($apiKeyResolver->resolveHosts($slug) as $customHost) {
+                    if (! in_array($customHost, $hosts)) {
+                        $hosts[] = $customHost;
+                    }
                 }
             }
 
