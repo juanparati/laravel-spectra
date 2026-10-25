@@ -8,6 +8,14 @@ All notable changes to `laravel-spectra` will be documented in this file.
 
 - Apps that opt into immutable dates with `Date::use(CarbonImmutable::class)` crashed on every dashboard request: the package type-hinted `Illuminate\Support\Carbon` but fed it values from `now()` and model datetime casts, which are then `Carbon\CarbonImmutable`. Date parameters, properties and return types now accept any `Carbon\CarbonInterface`. This also fixes OpenTelemetry span export, where the `instanceof` check silently turned every timestamp into `0`
 
+## v2.3.0 - 2026-10-24
+
+#### Added
+
+- Azure OpenAI requests are now tracked as `openai`. The `{resource}.openai.azure.com`, `{resource}.cognitiveservices.azure.com` and `{resource}.services.ai.azure.com` hosts are detected, and Azure paths (`/openai/deployments/{deployment}/...`, `/openai/v1/...`, `/openai/responses`) are mapped to the OpenAI `/v1` endpoints. Previously these requests were skipped without any error
+- Custom Azure domains are detected through `spectra.endpoint_urls.azure` or laravel-ai's `ai.providers.azure.url` (`AZURE_OPENAI_URL`), without replacing the OpenAI base URL
+- `Provider::normalizeEndpoint()` lets a provider map another path layout onto its endpoints before matching
+
 ## v2.2.0 - 2026-10-21
 
 #### Added

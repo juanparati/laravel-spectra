@@ -117,6 +117,27 @@ it('returns null host when no base url is configured', function () {
     expect($resolver->resolveHost('openai'))->toBeNull();
 });
 
+it('resolves every custom host for a provider', function () {
+    config([
+        'spectra.endpoint_urls.openai' => 'https://my-proxy.example.com/v1',
+        'ai.providers.azure.url' => 'https://contoso.openai.azure.com',
+    ]);
+
+    $resolver = new ApiKeyResolver;
+
+    expect($resolver->resolveHosts('openai'))->toBe(['my-proxy.example.com', 'contoso.openai.azure.com'])
+        ->and($resolver->resolveHosts('anthropic'))->toBe([]);
+});
+
+it('does not repeat a host configured twice', function () {
+    config([
+        'spectra.endpoint_urls.openai' => 'https://contoso.openai.azure.com/openai/v1',
+        'ai.providers.azure.url' => 'https://contoso.openai.azure.com',
+    ]);
+
+    expect((new ApiKeyResolver)->resolveHosts('openai'))->toBe(['contoso.openai.azure.com']);
+});
+
 it('resolves base url for all configured providers', function () {
     $providers = ['openai', 'anthropic', 'google', 'replicate', 'cohere', 'groq', 'xai', 'elevenlabs', 'openrouter', 'ollama'];
 

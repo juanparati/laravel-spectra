@@ -8,7 +8,7 @@ Spectra ships with built-in support for several AI providers. You can extend it 
 When an outgoing HTTP request is intercepted, Spectra's `ProviderRegistry` attempts to match it against all configured providers in two steps:
 
 1. **Host matching** — The request URL's hostname is compared against each provider's `getHosts()` list. Host patterns support `{placeholder}` syntax for variable segments, such as `{resource}.openai.azure.com`.
-2. **Endpoint matching** — The URL path is checked against each handler's `endpoints()` list to confirm the request targets a trackable API endpoint.
+2. **Endpoint matching** — The URL path is passed through the provider's `normalizeEndpoint()` method, then checked against each handler's `endpoints()` list to confirm the request targets a trackable API endpoint.
 
 Once matched, the provider's handler extracts normalized metrics from the response.
 
@@ -150,6 +150,15 @@ The `Provider` base class requires three abstract methods:
 | `getProvider()` | Returns the provider's identifier (e.g., `'mistral'`). Used as the stored `provider` value in the database. |
 | `getHosts()` | Returns hostnames to match against. Supports `{placeholder}` patterns for variable segments. |
 | `handlers()` | Returns an array of `Handler` instances. The provider routes each request to the matching handler. |
+
+Override `normalizeEndpoint()` when the same API is served under a different path layout. The returned path is used for endpoint matching, handler resolution, and the stored `endpoint` value. The built-in OpenAI provider uses it to map Azure OpenAI paths such as `/openai/deployments/{deployment}/chat/completions` to `/v1/chat/completions`:
+
+```php
+public function normalizeEndpoint(string $path): string
+{
+    return preg_replace('#^/api/#', '/v1/', $path);
+}
+```
 
 <a name="step-3-register-the-provider"></a>
 ### Step 3: Register the Provider

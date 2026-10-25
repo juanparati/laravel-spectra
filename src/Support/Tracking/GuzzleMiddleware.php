@@ -137,14 +137,15 @@ class GuzzleMiddleware
             return null;
         }
 
+        $providerInstance = $registry->provider($provider);
         $path = $request->getUri()->getPath();
+        $path = $providerInstance?->normalizeEndpoint($path) ?? $path;
 
         if (! $this->manual && ! $registry->isTrackableEndpoint($provider, $path)) {
             return null;
         }
 
         $requestData = self::parsePsrRequestData($request);
-        $providerInstance = $registry->provider($provider);
 
         $model = $providerInstance?->extractModelFromRequest($requestData, $path)
             ?? (is_string($requestData['model'] ?? null) ? $requestData['model'] : null)
